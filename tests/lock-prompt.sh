@@ -9,7 +9,8 @@ set -euo pipefail
 
 work=$(mktemp -d)
 cleanup() {
-  kill "$(jobs -p)" 2>/dev/null || true
+  # shellcheck disable=SC2046 # one argument for each job
+  kill $(jobs -p) 2>/dev/null || true
   wait 2>/dev/null || true
   rm -rf "$work"
 }
