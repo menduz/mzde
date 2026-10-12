@@ -1,0 +1,4 @@
+[portal]
+DBusName=org.freedesktop.impl.portal.desktop.kwm
+Interfaces=org.freedesktop.impl.portal.Inhibit;
+UseIn=river;

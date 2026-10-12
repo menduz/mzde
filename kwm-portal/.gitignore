@@ -1,0 +1,5 @@
+/build/
+/result
+/result-*
+/.zig-cache/
+/zig-out/

@@ -1,0 +1,4 @@
+[D-BUS Service]
+Name=org.freedesktop.impl.portal.desktop.kwm
+Exec=@out@/bin/kwm-portal
+SystemdService=kwm-portal.service

@@ -1,0 +1,134 @@
+{
+  "nodes": {
+    "kwim": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1786366981,
+        "narHash": "sha256-Ob59H1535EYReXMCERdlTNfhwv2GGBCSCmvfIeJzzzo=",
+        "owner": "kewuaa",
+        "repo": "kwim",
+        "rev": "becc1284ccc8c5abdfb8a117b561a97f4448e9dd",
+        "type": "github"
+      },
+      "original": {
+        "owner": "kewuaa",
+        "repo": "kwim",
+        "type": "github"
+      }
+    },
+    "kwm": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1791681938,
+        "narHash": "sha256-iQXOivsG2CxBZgYcang+hjz34QNpiqN+v7jGaUB0LW0=",
+        "ref": "refs/heads/master",
+        "rev": "3f9ba6c72b1e77db9a0733fff8a215b857a4fa4a",
+        "revCount": 701,
+        "type": "git",
+        "url": "https://github.com/menduz/kwm.git"
+      },
+      "original": {
+        "ref": "master",
+        "type": "git",
+        "url": "https://github.com/menduz/kwm.git"
+      }
+    },
+    "mz-term-colors": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1791732320,
+        "narHash": "sha256-Yu2Gq85642gTIg7yZ9BK0qDE+cmq6Fx43tLnSy1kXjs=",
+        "ref": "refs/heads/main",
+        "rev": "978462fffdffee30d461309f709cc0039f1da395",
+        "revCount": 3,
+        "type": "git",
+        "url": "https://github.com/menduz/mz-term-colors.git"
+      },
+      "original": {
+        "ref": "main",
+        "type": "git",
+        "url": "https://github.com/menduz/mz-term-colors.git"
+      }
+    },
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 1791662279,
+        "narHash": "sha256-xI8L+UwJLIg75yVJwLPsY+AUEP1teCT3FyuvodyJu2Y=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "6fcc160353f63555b560f25588925133c8f61f2a",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-26.05",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "river": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1791682018,
+        "narHash": "sha256-jAYmvsj1lW+Sie4+CTuzB3737aTALJ5ujm8URws/2rs=",
+        "ref": "refs/heads/main",
+        "rev": "a95c3e9381dbb9f818bf95687760d94852d2c8f5",
+        "revCount": 1801,
+        "type": "git",
+        "url": "https://github.com/menduz/river.git"
+      },
+      "original": {
+        "ref": "main",
+        "type": "git",
+        "url": "https://github.com/menduz/river.git"
+      }
+    },
+    "root": {
+      "inputs": {
+        "kwim": "kwim",
+        "kwm": "kwm",
+        "mz-term-colors": "mz-term-colors",
+        "nixpkgs": "nixpkgs",
+        "river": "river",
+        "waylock": "waylock",
+        "win-classic-theme": "win-classic-theme"
+      }
+    },
+    "waylock": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1791682938,
+        "narHash": "sha256-Crm4OOhPDu9801kjMEEWZHB2Lgwe9znAtWgHGiJZZFY=",
+        "ref": "refs/heads/master",
+        "rev": "8a410b9bed12919373d45a9aa811497abcf9ab0c",
+        "revCount": 227,
+        "type": "git",
+        "url": "https://github.com/menduz/waylock.git"
+      },
+      "original": {
+        "ref": "master",
+        "type": "git",
+        "url": "https://github.com/menduz/waylock.git"
+      }
+    },
+    "win-classic-theme": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1791678917,
+        "narHash": "sha256-x9dtvl5Qn0OSiQaWOloSThBMbmW7Or7bZ8B+LEHprf4=",
+        "ref": "refs/heads/main",
+        "rev": "a6934ae40c4484677f118017501ca24cd64197a4",
+        "revCount": 76,
+        "type": "git",
+        "url": "https://github.com/menduz/win-classic-theme.git"
+      },
+      "original": {
+        "ref": "main",
+        "type": "git",
+        "url": "https://github.com/menduz/win-classic-theme.git"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}

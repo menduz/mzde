@@ -1,0 +1,14 @@
+--- a/source/view.c
++++ b/source/view.c
+@@ -887,6 +887,11 @@
+     rofi_view_calculate_window_position(state);
+     rofi_view_window_update_size(state);
+     g_debug("Resize based on re-filter");
++  } else if (state->list_view != NULL) {
++    // The window keeps its size (for example a fullscreen window), so no
++    // resize lays out the boxes again. Lay out the boxes that hold the list
++    // view, because the desired height of the list view can change.
++    widget_update(WIDGET(state->list_view)->parent);
+   }
+   TICK_N("Filter resize window based on window ");
+   state->refilter = FALSE;

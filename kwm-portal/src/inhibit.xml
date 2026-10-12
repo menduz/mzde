@@ -1,0 +1,25 @@
+<node>
+  <interface name="org.freedesktop.impl.portal.Inhibit">
+    <method name="Inhibit">
+      <arg name="handle" type="o" direction="in"/>
+      <arg name="app_id" type="s" direction="in"/>
+      <arg name="window" type="s" direction="in"/>
+      <arg name="flags" type="u" direction="in"/>
+      <arg name="options" type="a{sv}" direction="in"/>
+    </method>
+    <method name="CreateMonitor">
+      <arg name="handle" type="o" direction="in"/>
+      <arg name="session_handle" type="o" direction="in"/>
+      <arg name="app_id" type="s" direction="in"/>
+      <arg name="window" type="s" direction="in"/>
+      <arg name="response" type="u" direction="out"/>
+    </method>
+    <method name="QueryEndResponse">
+      <arg name="session_handle" type="o" direction="in"/>
+    </method>
+    <signal name="StateChanged">
+      <arg name="session_handle" type="o"/>
+      <arg name="state" type="a{sv}"/>
+    </signal>
+  </interface>
+</node>
