@@ -31,6 +31,11 @@
       url = "git+https://github.com/menduz/win-classic-theme.git?ref=main";
       flake = false;
     };
+    # Only for the screenshots: they build a demo system with mzwm.
+    home-manager = {
+      url = "github:nix-community/home-manager/release-26.05";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     # Terminal color themes from one color.
     mz-term-colors = {
       url = "git+https://github.com/menduz/mz-term-colors.git?ref=main";
@@ -47,6 +52,12 @@
       ];
       forSystems = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
       packagesFor = pkgs: import ./pkgs { inherit pkgs inputs; };
+      shots = import ./dev/screenshots.nix {
+        pkgs = nixpkgs.legacyPackages.x86_64-linux;
+        inherit (nixpkgs) lib;
+        inherit inputs;
+        nixosModule = self.nixosModules.default;
+      };
     in
     {
       # The desktop. Import it in a NixOS configuration with Home Manager, and
@@ -71,6 +82,9 @@
             ;
           kwm-portal = pkgs.callPackage ./kwm-portal/nix/package.nix { };
         }
+        // nixpkgs.lib.optionalAttrs (pkgs.stdenv.hostPlatform.system == "x86_64-linux") {
+          inherit (shots) screenshots screenshot;
+        }
       );
 
       checks.x86_64-linux =
@@ -85,6 +99,13 @@
             inherit (p) river kwm waylock;
           };
         };
+
+      # `nix run .#screenshots` writes screenshots/dark.png and
+      # screenshots/light.png. Refer to dev/screenshots.nix.
+      apps.x86_64-linux.screenshots = {
+        type = "app";
+        program = nixpkgs.lib.getExe shots.update;
+      };
 
       formatter = forSystems (pkgs: pkgs.nixfmt);
     };

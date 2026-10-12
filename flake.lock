@@ -1,5 +1,26 @@
 {
   "nodes": {
+    "home-manager": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1790996401,
+        "narHash": "sha256-f+kOxEmOUnQazVAmGg0i8hzwgd1kX/geY+k/Dpheye8=",
+        "owner": "nix-community",
+        "repo": "home-manager",
+        "rev": "db7d5e2332710f5abb088f6b5de927d7f9511b35",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nix-community",
+        "ref": "release-26.05",
+        "repo": "home-manager",
+        "type": "github"
+      }
+    },
     "kwim": {
       "flake": false,
       "locked": {
@@ -19,11 +40,11 @@
     "kwm": {
       "flake": false,
       "locked": {
-        "lastModified": 1791681938,
-        "narHash": "sha256-iQXOivsG2CxBZgYcang+hjz34QNpiqN+v7jGaUB0LW0=",
+        "lastModified": 1791823541,
+        "narHash": "sha256-yc7bN4oecalB9uynYadb2jwXwIVCZdIec9nLlMtwozU=",
         "ref": "refs/heads/master",
-        "rev": "3f9ba6c72b1e77db9a0733fff8a215b857a4fa4a",
-        "revCount": 701,
+        "rev": "efa8f7dedf78bea3d0fcdd031a5530c0920b6082",
+        "revCount": 702,
         "type": "git",
         "url": "https://github.com/menduz/kwm.git"
       },
@@ -69,11 +90,11 @@
     "river": {
       "flake": false,
       "locked": {
-        "lastModified": 1791682018,
-        "narHash": "sha256-jAYmvsj1lW+Sie4+CTuzB3737aTALJ5ujm8URws/2rs=",
+        "lastModified": 1791823541,
+        "narHash": "sha256-X9mnM9nKGbglnQ2Chr/2DvT3n9qpNO3FlEeIXXuH3CU=",
         "ref": "refs/heads/main",
-        "rev": "a95c3e9381dbb9f818bf95687760d94852d2c8f5",
-        "revCount": 1801,
+        "rev": "997a1cfe745fccaadc0f14926fc1d97579d5c73f",
+        "revCount": 1802,
         "type": "git",
         "url": "https://github.com/menduz/river.git"
       },
@@ -85,6 +106,7 @@
     },
     "root": {
       "inputs": {
+        "home-manager": "home-manager",
         "kwim": "kwim",
         "kwm": "kwm",
         "mz-term-colors": "mz-term-colors",
@@ -97,11 +119,11 @@
     "waylock": {
       "flake": false,
       "locked": {
-        "lastModified": 1791682938,
-        "narHash": "sha256-Crm4OOhPDu9801kjMEEWZHB2Lgwe9znAtWgHGiJZZFY=",
+        "lastModified": 1791823541,
+        "narHash": "sha256-qp37Ue2Lt4/xdg1ut/XKZJ6OF9ic+d95hVcTB0FQTlU=",
         "ref": "refs/heads/master",
-        "rev": "8a410b9bed12919373d45a9aa811497abcf9ab0c",
-        "revCount": 227,
+        "rev": "800b368d4b9bc5971ab8d9a86f9e57480379dca5",
+        "revCount": 228,
         "type": "git",
         "url": "https://github.com/menduz/waylock.git"
       },
