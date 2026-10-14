@@ -1,0 +1,17 @@
+--- a/main.c
++++ b/main.c
+@@ -624,6 +624,14 @@
+ 	struct swayidle_timeout_cmd *cmd;
+ 	wl_list_for_each(cmd, &state.timeout_cmds, link) {
+ 		destroy_cmd_timer(cmd);
++		// The notification is gone and will not send "resumed". Run the
++		// resume command now, else it never runs (the outputs stay off).
++		if (cmd->resume_pending) {
++			cmd->resume_pending = false;
++			if (!cmd->idlehint && cmd->resume_cmd) {
++				cmd_exec(cmd->resume_cmd);
++			}
++		}
+ 	}
+ 	if (state.logind_idlehint) {
+ 		set_idle_hint(false);

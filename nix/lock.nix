@@ -11,13 +11,14 @@ let
   cfg = config.mzde;
   inherit (cfg) colors;
   # The fork of waylock: a password prompt in Terminus in the center of each
-  # output.
+  # output. swayidle with the patch of pkgs/default.nix.
   inherit
     (import ../pkgs {
       inherit pkgs;
       inputs = mzdeInputs;
     })
     waylock
+    swayidle
     ;
   # waylock takes the colors as 0xRRGGBB.
   hex = color: "0x${lib.removePrefix "#" color}";
@@ -117,6 +118,7 @@ in
         #             logind manages suspension considering the inhibitions
         services.swayidle = {
           enable = true;
+          package = swayidle;
           systemdTargets = [ cfg.sessionTarget ];
           # -w: swayidle waits for the command of before-sleep. It holds the
           # delay inhibitor of logind until then, thus the system sleeps only

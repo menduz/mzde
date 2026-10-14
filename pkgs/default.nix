@@ -25,4 +25,12 @@
   rofi-unwrapped = pkgs.rofi-unwrapped.overrideAttrs (old: {
     patches = (old.patches or [ ]) ++ [ ./rofi-relayout-list.patch ];
   });
+
+  # swayidle with a patch: when a logind idle inhibitor stops the timeouts, the
+  # pending resume commands run. Without it, an inhibitor that starts while the
+  # outputs are off (a notification sound) drops `wlopm --on`, and the outputs
+  # stay off after the user comes back.
+  swayidle = pkgs.swayidle.overrideAttrs (old: {
+    patches = (old.patches or [ ]) ++ [ ./swayidle-resume-on-inhibit.patch ];
+  });
 }
