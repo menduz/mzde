@@ -57,11 +57,11 @@
     "mz-term-colors": {
       "flake": false,
       "locked": {
-        "lastModified": 1791732320,
-        "narHash": "sha256-Yu2Gq85642gTIg7yZ9BK0qDE+cmq6Fx43tLnSy1kXjs=",
+        "lastModified": 1792012846,
+        "narHash": "sha256-lQqJudCaprDttUUXpuDN8Xhy1GyyMB5MP97DCsGC3SM=",
         "ref": "refs/heads/main",
-        "rev": "978462fffdffee30d461309f709cc0039f1da395",
-        "revCount": 3,
+        "rev": "e8afd5ae795dcc7203c18c3dcbaa27698ce503d3",
+        "revCount": 4,
         "type": "git",
         "url": "https://github.com/menduz/mz-term-colors.git"
       },
