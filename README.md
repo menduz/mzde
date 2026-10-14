@@ -1,4 +1,4 @@
-# mzwm
+# mzde
 
 A desktop for NixOS: [river](https://codeberg.org/river/river) (the main
 branch, with patches) and the [kwm](https://github.com/menduz/kwm) window
@@ -6,8 +6,8 @@ manager, the [win-classic](https://github.com/menduz/win-classic-theme) theme
 for GTK, kwm and rofi, and the [waylock](https://github.com/menduz/waylock)
 screen locker.
 
-![mzwm with the dark scheme](screenshots/dark.png)
-![mzwm with the light scheme](screenshots/light.png)
+![mzde with the dark scheme](screenshots/dark.png)
+![mzde with the light scheme](screenshots/light.png)
 
 - The kwm bar: tags, layout, title, memory, clock, CPU, busy disks, privacy
   (microphone and camera), sleep inhibitors, media, docker, battery, disk
@@ -24,27 +24,27 @@ screen locker.
 
 ## Use
 
-mzwm is a NixOS module. It needs the NixOS module of Home Manager: it gives
+mzde is a NixOS module. It needs the NixOS module of Home Manager: it gives
 the user part of the desktop to each Home Manager user.
 
 ```nix
 {
-  inputs.mzwm = {
-    url = "git+https://github.com/menduz/mzwm.git?ref=main";
+  inputs.mzde = {
+    url = "git+https://github.com/menduz/mzde.git?ref=main";
     inputs.nixpkgs.follows = "nixpkgs";
     inputs.home-manager.follows = "home-manager";
   };
 
-  outputs = { nixpkgs, home-manager, mzwm, ... }: {
+  outputs = { nixpkgs, home-manager, mzde, ... }: {
     nixosConfigurations.box = nixpkgs.lib.nixosSystem {
       system = "x86_64-linux";
       modules = [
         home-manager.nixosModules.home-manager
-        mzwm.nixosModules.default
+        mzde.nixosModules.default
         {
-          mzwm.enable = true;
-          mzwm.keymap.layout = "us";
-          mzwm.bindings."Super Return" = "ghostty";
+          mzde.enable = true;
+          mzde.keymap.layout = "us";
+          mzde.bindings."Super Return" = "ghostty";
         }
       ];
     };
@@ -53,22 +53,22 @@ the user part of the desktop to each Home Manager user.
 ```
 
 The display manager shows the session "river". Start the session programs
-with `mzwm.sessionTarget` (`river-session.target`).
+with `mzde.sessionTarget` (`river-session.target`).
 
 ## Options
 
 All options are in `nix/options.nix`.
 
-- `mzwm.bindings`, `mzwm.floatRules`, `mzwm.startupCommands`: key bindings
+- `mzde.bindings`, `mzde.floatRules`, `mzde.startupCommands`: key bindings
   that run commands, windows that float, programs to start.
-- `mzwm.terminal`, `mzwm.keymap`, `mzwm.keyRepeat`, `mzwm.naturalScroll`.
-- `mzwm.bar.center`, `mzwm.bar.right`, `mzwm.bar.end`: more widgets.
-  `mzwm.lib.scriptWidget` makes a widget from a script.
-- `mzwm.colors`, `mzwm.kwm.settings`: colors, and other values for the
+- `mzde.terminal`, `mzde.keymap`, `mzde.keyRepeat`, `mzde.naturalScroll`.
+- `mzde.bar.center`, `mzde.bar.right`, `mzde.bar.end`: more widgets.
+  `mzde.lib.scriptWidget` makes a widget from a script.
+- `mzde.colors`, `mzde.kwm.settings`: colors, and other values for the
   configuration of kwm.
-- `mzwm.lock.*`: idle times, and a command after the unlock.
-- `mzwm.rofi.plugins`; `mzwm.rofi.package` is the `mz-rofi` command.
-- `mzwm.toggleTheme` is the `toggle-theme` command.
+- `mzde.lock.*`: idle times, and a command after the unlock.
+- `mzde.rofi.plugins`; `mzde.rofi.package` is the `mz-rofi` command.
+- `mzde.toggleTheme` is the `toggle-theme` command.
 - `programs.win-classic-theme.*`: the theme. Refer to win-classic-theme.
 
 ## Development
@@ -76,7 +76,7 @@ All options are in `nix/options.nix`.
 The inputs `river`, `kwm`, `waylock`, `win-classic-theme` and
 `mz-term-colors` are the forks on GitHub. To build with local checkouts, use
 `--override-input`, for example `--override-input kwm git+file:///path/kwm`.
-From a flake that has mzwm as an input, use `--override-input mzwm/kwm ...`.
+From a flake that has mzde as an input, use `--override-input mzde/kwm ...`.
 
 `nix run .#screenshots` writes `screenshots/dark.png` and
 `screenshots/light.png`: river with the headless backend, kwm with the

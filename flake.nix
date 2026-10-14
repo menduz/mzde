@@ -1,5 +1,5 @@
 {
-  description = "mzwm: a desktop on river with the kwm window manager and the win-classic theme";
+  description = "mzde: a desktop on river with the kwm window manager and the win-classic theme";
 
   inputs = {
     # The modules use the nixpkgs of the system. This input builds the
@@ -31,7 +31,7 @@
       url = "git+https://github.com/menduz/win-classic-theme.git?ref=main";
       flake = false;
     };
-    # Only for the screenshots: they build a demo system with mzwm.
+    # Only for the screenshots: they build a demo system with mzde.
     home-manager = {
       url = "github:nix-community/home-manager/release-26.05";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -61,9 +61,9 @@
     in
     {
       # The desktop. Import it in a NixOS configuration with Home Manager, and
-      # set mzwm.enable = true. Refer to README.md.
+      # set mzde.enable = true. Refer to README.md.
       nixosModules.default = import ./nix/nixos.nix inputs;
-      nixosModules.mzwm = self.nixosModules.default;
+      nixosModules.mzde = self.nixosModules.default;
 
       # The Nix library of mz-term-colors: `lib.termColors { inherit pkgs; }`.
       lib.termColors = import "${inputs.mz-term-colors}/lib";

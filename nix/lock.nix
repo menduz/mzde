@@ -2,20 +2,20 @@
   lib,
   pkgs,
   config,
-  mzwmInputs,
+  mzdeInputs,
   ...
 }:
 # The screen lock: swayidle locks the session with waylock, turns off the
 # outputs and suspends the system after an idle time.
 let
-  cfg = config.mzwm;
+  cfg = config.mzde;
   inherit (cfg) colors;
   # The fork of waylock: a password prompt in Terminus in the center of each
   # output.
   inherit
     (import ../pkgs {
       inherit pkgs;
-      inputs = mzwmInputs;
+      inputs = mzdeInputs;
     })
     waylock
     ;
@@ -28,7 +28,7 @@ let
   # -fork-on-lock returns after the lock, as swaylock -f did: a child of
   # waylock holds the lock until the user unlocks.
   #
-  # After the unlock, the script runs mzwm.lock.afterUnlock. The outputs can
+  # After the unlock, the script runs mzde.lock.afterUnlock. The outputs can
   # change while the screen is locked, for example after a resume or when a
   # monitor wakes up late. A lock that fails (the session is locked already)
   # does not run it.
@@ -82,7 +82,7 @@ in
       ];
     };
 
-    mzwm.bindings."Super+Control Q" = {
+    mzde.bindings."Super+Control Q" = {
       command = "${pkgs.systemd}/bin/loginctl lock-session";
       description = "Lock the screen";
     };

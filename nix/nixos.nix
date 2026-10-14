@@ -1,21 +1,21 @@
-# The NixOS module of mzwm. It also gives the Home Manager part of the desktop
+# The NixOS module of mzde. It also gives the Home Manager part of the desktop
 # to each Home Manager user (home-manager.sharedModules). Thus the system
 # needs the NixOS module of Home Manager.
 #
 # The argument is the inputs of flake.nix. The imports need them, thus they
 # cannot come from a module argument. The other files get them as the module
-# argument mzwmInputs.
-mzwmInputs:
+# argument mzdeInputs.
+mzdeInputs:
 {
   config,
   lib,
   ...
 }:
 let
-  cfg = config.mzwm;
-  winClassicTheme = mzwmInputs.win-classic-theme;
+  cfg = config.mzde;
+  winClassicTheme = mzdeInputs.win-classic-theme;
 
-  # The defaults of mzwm for the theme. NixOS and Home Manager each have the
+  # The defaults of mzde for the theme. NixOS and Home Manager each have the
   # options of the theme, so both get these values.
   themeDefaults = {
     enabled = lib.mkDefault true;
@@ -29,7 +29,7 @@ let
 in
 {
   imports = [
-    { _module.args.mzwmInputs = mzwmInputs; }
+    { _module.args.mzdeInputs = mzdeInputs; }
     ./options.nix
     ./session.nix
     ./river.nix

@@ -9,10 +9,10 @@
 # "tooltip" and "class", the format of waybar custom modules. Refer to
 # src/config/widget.zig in kwm.
 #
-# Other modules add widgets with mzwm.bar.center, mzwm.bar.right and
-# mzwm.bar.end. Refer to options.nix.
+# Other modules add widgets with mzde.bar.center, mzde.bar.right and
+# mzde.bar.end. Refer to options.nix.
 let
-  cfg = config.mzwm;
+  cfg = config.mzde;
   zon = import ./zon.nix { inherit lib; };
 
   btop = "${cfg.terminal} -e ${pkgs.btop}/bin/btop --preset 2 -u 100";
@@ -381,10 +381,10 @@ let
 in
 {
   config = lib.mkIf cfg.enable {
-    # The widgets of mzwm. Other widgets without an order go between the
+    # The widgets of mzde. Other widgets without an order go between the
     # disk widget and the privacy widget in the center, after the disk usage
     # at the right, and before the notifications at the end.
-    mzwm.bar.center = lib.mkMerge [
+    mzde.bar.center = lib.mkMerge [
       # A click on the memory or CPU meter starts btop.
       (lib.mkOrder 900 [
         {
@@ -413,7 +413,7 @@ in
         (cfg.lib.scriptWidget { exec = lib.getExe privacyStatus; })
       ])
     ];
-    mzwm.bar.right = lib.mkOrder 900 [
+    mzde.bar.right = lib.mkOrder 900 [
       # ☕ when a lock blocks sleep. The tooltip is the list of locks.
       (cfg.lib.scriptWidget {
         exec = lib.getExe sleepInhibitStatus;
@@ -449,7 +449,7 @@ in
     ];
     # At the right of the tray: the notification dot of dunst. Its tooltip
     # holds the last notifications. It has no click command.
-    mzwm.bar.end = lib.mkOrder 1100 [
+    mzde.bar.end = lib.mkOrder 1100 [
       (cfg.lib.scriptWidget {
         exec = lib.getExe notification-status;
         interval = 5000;

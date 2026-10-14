@@ -1,4 +1,4 @@
-# The packages of mzwm, built with the given nixpkgs from the sources in the
+# The packages of mzde, built with the given nixpkgs from the sources in the
 # inputs of flake.nix.
 { pkgs, inputs }:
 # The recipes of river, kwm and waylock are in their repositories (nix/), next
@@ -11,7 +11,7 @@
   kwm = pkgs.callPackage "${inputs.kwm}/nix" {
     kwmSource = inputs.kwm;
     version = "0-unstable-${inputs.kwm.lastModifiedDate or "0"}";
-    # The configuration of mzwm has a desktop color below the windows.
+    # The configuration of mzde has a desktop color below the windows.
     withBackground = true;
   };
   kwim = pkgs.callPackage ./kwim.nix { src = inputs.kwim; };

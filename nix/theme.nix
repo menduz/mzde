@@ -5,9 +5,9 @@
   ...
 }:
 # toggle-theme: change the scheme of win-classic-theme at run time, without a
-# rebuild. mzwm puts it on Super+Shift O.
+# rebuild. mzde puts it on Super+Shift O.
 let
-  cfg = config.mzwm;
+  cfg = config.mzde;
 
   # The theme that the theme module builds: one theme for each scheme, and
   # one theme with all schemes in one GTK4 style sheet.
@@ -28,7 +28,7 @@ let
   #   - color-scheme and high-contrast go to the settings portal. A libadwaita
   #     program (Ghostty) has the theme with all schemes (GTK_THEME), and
   #     selects the scheme from these two values.
-  # mzwm puts this script on Super+Shift O.
+  # mzde puts this script on Super+Shift O.
   toggle-theme = pkgs.writeShellScriptBin "toggle-theme" ''
     set -euo pipefail
 
@@ -105,7 +105,7 @@ let
   '';
 in
 {
-  options.mzwm.toggleTheme = lib.mkOption {
+  options.mzde.toggleTheme = lib.mkOption {
     type = lib.types.package;
     readOnly = true;
     default = toggle-theme;
@@ -117,7 +117,7 @@ in
   };
 
   config = lib.mkIf cfg.enable {
-    mzwm.bindings."Super+Shift O" = {
+    mzde.bindings."Super+Shift O" = {
       command = lib.getExe toggle-theme;
       description = "Light or dark theme";
     };

@@ -1,8 +1,8 @@
-# Takes a screenshot of mzwm: river with the headless backend of wlroots, kwm
+# Takes a screenshot of mzde: river with the headless backend of wlroots, kwm
 # with the configuration of the demo system, three tray items, Thunar and
-# Ghostty. Run it with the environment of `mzwm-screenshot` in screenshots.nix.
+# Ghostty. Run it with the environment of `mzde-screenshot` in screenshots.nix.
 #
-# Usage: mzwm-screenshot <output directory> <variant> <settings file>
+# Usage: mzde-screenshot <output directory> <variant> <settings file>
 #
 # The settings file gives HOME_FILES, GSETTINGS_KEYFILE, HOME_PATH, THEME_NAME
 # and GHOSTTY_THEME of the variant. The script writes <output directory>/<variant>.png.
@@ -12,15 +12,15 @@
 # the desktop changes.
 set -euo pipefail
 
-out=${1:?usage: mzwm-screenshot <output directory> <variant> <settings file>}
-variant=${2:?usage: mzwm-screenshot <output directory> <variant> <settings file>}
-settings=${3:?usage: mzwm-screenshot <output directory> <variant> <settings file>}
+out=${1:?usage: mzde-screenshot <output directory> <variant> <settings file>}
+variant=${2:?usage: mzde-screenshot <output directory> <variant> <settings file>}
+settings=${3:?usage: mzde-screenshot <output directory> <variant> <settings file>}
 # shellcheck source=/dev/null
 . "$settings"
 mkdir -p "$out"
 
 # The places are always the same, so Thunar always shows the same path.
-work=${TMPDIR:-/tmp}/mzwm
+work=${TMPDIR:-/tmp}/mzde
 rm -rf "$work"
 mkdir -p "$work"
 
@@ -119,7 +119,7 @@ for _ in $(seq 100); do
   sleep 0.1
 done
 if [ -z "${socket:-}" ]; then
-  echo "mzwm-screenshot: river did not start" >&2
+  echo "mzde-screenshot: river did not start" >&2
   cat "$work/river.log" >&2
   exit 1
 fi
@@ -137,7 +137,7 @@ thunar "$HOME" >"$work/thunar.log" 2>&1 &
 pids+=("$!")
 sleep 2
 
-# Ghostty with the colors of mz-term-colors for the accent color of mzwm. The
+# Ghostty with the colors of mz-term-colors for the accent color of mzde. The
 # shell prints a fixed text and waits.
 mkdir -p "$XDG_CONFIG_HOME/ghostty"
 cat >"$XDG_CONFIG_HOME/ghostty/config" <<GHOSTTY
@@ -152,7 +152,7 @@ gtk-single-instance = false
 GHOSTTY
 cat >"$work/shell.sh" <<'SHELL'
 cd "$HOME"
-prompt() { printf '\033[1;32mdemo@mzwm\033[0m \033[1;34m~\033[0m $ %s\n' "$1"; }
+prompt() { printf '\033[1;32mdemo@mzde\033[0m \033[1;34m~\033[0m $ %s\n' "$1"; }
 prompt ls
 ls --color=always
 prompt colors
@@ -162,7 +162,7 @@ for row in 0 8; do
   done
   printf '\n'
 done
-printf '\033[1;32mdemo@mzwm\033[0m \033[1;34m~\033[0m $ '
+printf '\033[1;32mdemo@mzde\033[0m \033[1;34m~\033[0m $ '
 exec sleep infinity
 SHELL
 __EGL_VENDOR_LIBRARY_FILENAMES=$MESA_EGL_VENDOR LIBGL_DRIVERS_PATH=$MESA_DRIVERS \
@@ -185,10 +185,10 @@ for _ in $(seq 30); do
   mv "$work/current.png" "$work/previous.png"
 done
 if [ -z "$stable" ]; then
-  echo "mzwm-screenshot: the screen did not become stable" >&2
+  echo "mzde-screenshot: the screen did not become stable" >&2
   tail -n 20 "$work/river.log" "$work/thunar.log" "$work/ghostty.log" >&2
   exit 1
 fi
 
 install -m 644 "$work/current.png" "$out/$variant.png"
-echo "mzwm-screenshot: wrote $out/$variant.png"
+echo "mzde-screenshot: wrote $out/$variant.png"

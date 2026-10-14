@@ -3,7 +3,7 @@
   pkgs,
   ...
 }:
-# The options of mzwm. Other modules add bindings, float rules and startup
+# The options of mzde. Other modules add bindings, float rules and startup
 # commands through these options. They do not write the configuration of kwm
 # directly.
 let
@@ -53,15 +53,15 @@ let
       default = [ ];
       description = ''
         The widgets of kwm in the ${where} of the bar, as Nix values for
-        config.zon. Refer to src/config/widget.zig in kwm. mzwm adds its own
+        config.zon. Refer to src/config/widget.zig in kwm. mzde adds its own
         widgets with lib.mkOrder. A value without an order goes between them.
-        Use mzwm.lib to make a widget.
+        Use mzde.lib to make a widget.
       '';
     };
 in
 {
-  options.mzwm = {
-    enable = lib.mkEnableOption "mzwm, the river desktop with kwm";
+  options.mzde = {
+    enable = lib.mkEnableOption "mzde, the river desktop with kwm";
 
     sessionTarget = lib.mkOption {
       type = lib.types.str;
@@ -77,7 +77,7 @@ in
       type = lib.types.package;
       readOnly = true;
       description = ''
-        The script that starts mzwm.sessionTarget. The window manager runs it
+        The script that starts mzde.sessionTarget. The window manager runs it
         once, after the compositor sets WAYLAND_DISPLAY.
       '';
     };
@@ -103,7 +103,7 @@ in
             // lib.optionalAttrs (onClick != null) { on_click = onClick; };
           };
       };
-      description = "Helpers to make the values of mzwm.bar and mzwm.kwm.settings.";
+      description = "Helpers to make the values of mzde.bar and mzde.kwm.settings.";
     };
 
     bindings = lib.mkOption {
@@ -190,7 +190,7 @@ in
     colors = lib.mkOption {
       type = lib.types.attrs;
       default = import ./colors.nix;
-      defaultText = lib.literalExpression "import mzwm/nix/colors.nix";
+      defaultText = lib.literalExpression "import mzde/nix/colors.nix";
       description = ''
         The colors of the bar, the borders and the lock screen. Refer to
         nix/colors.nix for the names. The win-classic theme gives the colors
@@ -208,8 +208,8 @@ in
       type = lib.types.attrs;
       default = { };
       description = ''
-        Values for config.zon of kwm. They replace the values of mzwm
-        (lib.recursiveUpdate). Use mzwm.lib.zon for enums.
+        Values for config.zon of kwm. They replace the values of mzde
+        (lib.recursiveUpdate). Use mzde.lib.zon for enums.
       '';
     };
 

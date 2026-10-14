@@ -7,7 +7,7 @@
 # The Wayland session around river: the tools, the environment of the
 # programs, the portals, polkit, and the screenshot commands.
 let
-  cfg = config.mzwm;
+  cfg = config.mzde;
 
   # `scrn`: a screenshot of all outputs. `slurpscrn`: a screenshot of an area
   # that the user selects. Each one writes ~/Screenshots/screenshot-<time>.png,
@@ -93,14 +93,14 @@ in
     services.graphical-desktop.enable = true;
 
     # polkit-gnome needs polkit. The river module of NixOS also enables polkit,
-    # but mzwm does not use that module.
+    # but mzde does not use that module.
     security.polkit.enable = true;
 
     # Window manager only sessions (unlike DEs) don't handle XDG
     # autostart files, so force them to run the service
     services.xserver.desktopManager.runXdgAutostartIfNone = lib.mkDefault true;
 
-    mzwm.bindings = {
+    mzde.bindings = {
       "Super+Alt 1" = {
         command = lib.getExe scrn;
         description = "Screenshot";

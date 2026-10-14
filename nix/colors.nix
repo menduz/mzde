@@ -1,4 +1,4 @@
-# The default colors and sizes of mzwm. Set mzwm.colors to change them. The
+# The default colors and sizes of mzde. Set mzde.colors to change them. The
 # win-classic theme gives the colors of the title bars and of the 3D borders.
 {
   # The desktop below the windows. kwm uses desktop_color of the GTK theme

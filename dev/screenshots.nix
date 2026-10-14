@@ -1,9 +1,9 @@
-# The screenshots of mzwm: river with the headless backend of wlroots, kwm
+# The screenshots of mzde: river with the headless backend of wlroots, kwm
 # with the configuration of the module, Ghostty and Thunar, in the dark and in
 # the light scheme of the theme. Refer to screenshot.sh.
 #
 # The demo system (demo.nix) gives the files of the home directory, so the
-# screenshots show the configuration that a user of mzwm gets. The bar always
+# screenshots show the configuration that a user of mzde gets. The bar always
 # shows the same clock, CPU, memory and disk values, so the images change only
 # when the desktop changes.
 {
@@ -31,7 +31,7 @@ let
 
   # Fixed values for the CPU, memory, disk and battery widgets of kwm. The
   # library is in the kwm source. Refer to nix/screenshot-preload.c in kwm.
-  preload = pkgs.runCommandCC "mzwm-screenshot-preload" { } ''
+  preload = pkgs.runCommandCC "mzde-screenshot-preload" { } ''
     mkdir -p "$out/lib"
     $CC -shared -fPIC -O2 -Wall -Wextra -o "$out/lib/screenshot-preload.so" \
       ${inputs.kwm}/nix/screenshot-preload.c -ldl
@@ -40,7 +40,7 @@ let
   # The fonts of the demo system: Inter for GTK, Terminus for the bar, the
   # Nerd Font symbols for the icons of the widgets, DejaVu for the other
   # glyphs. Ghostty has its own font.
-  fontsConf = pkgs.writeText "mzwm-screenshot-fonts.conf" ''
+  fontsConf = pkgs.writeText "mzde-screenshot-fonts.conf" ''
     <?xml version="1.0"?>
     <!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">
     <fontconfig>
@@ -73,7 +73,7 @@ let
   # the icon theme and the GTK theme from GSettings, not from settings.ini.
   gsettingsKeyfile =
     variant: user:
-    pkgs.writeText "mzwm-screenshot-${variant}-gsettings" (
+    pkgs.writeText "mzde-screenshot-${variant}-gsettings" (
       lib.generators.toINI {
         mkKeyValue = key: value: "${key}=${toString (inputs.home-manager.lib.hm.gvariant.mkValue value)}";
       } user.dconf.settings
@@ -86,21 +86,21 @@ let
       config = demo variant;
       user = config.home-manager.users.demo;
     in
-    pkgs.writeText "mzwm-screenshot-${variant}.env" ''
+    pkgs.writeText "mzde-screenshot-${variant}.env" ''
       HOME_FILES=${user.home-files}
       GSETTINGS_KEYFILE=${gsettingsKeyfile variant user}
       HOME_PATH=${user.home.path}
       THEME_NAME=${config.programs.win-classic-theme.theme.variantName}
       GHOSTTY_THEME=${
         termColors.ghosttyTheme {
-          color = config.mzwm.colors.border.focus;
+          color = config.mzde.colors.border.focus;
           inherit variant;
         }
       }
     '';
 
   screenshot = pkgs.writeShellApplication {
-    name = "mzwm-screenshot";
+    name = "mzde-screenshot";
     runtimeInputs = [
       packages.river
       pkgs.ghostty
@@ -137,14 +137,14 @@ in
   inherit screenshot;
 
   screenshots =
-    pkgs.runCommand "mzwm-screenshots"
+    pkgs.runCommand "mzde-screenshots"
       {
         nativeBuildInputs = [ screenshot ];
-        meta.description = "Screenshots of mzwm";
+        meta.description = "Screenshots of mzde";
       }
       ''
         ${lib.concatMapStrings (variant: ''
-          mzwm-screenshot "$out" ${variant} ${variantEnv variant}
+          mzde-screenshot "$out" ${variant} ${variantEnv variant}
         '') variants}
       '';
 
@@ -154,7 +154,7 @@ in
     name = "update-screenshots";
     text = ''
       if [ ! -e ./flake.nix ] || [ ! -e ./dev/screenshots.nix ]; then
-        echo "update-screenshots: run this in the directory of mzwm" >&2
+        echo "update-screenshots: run this in the directory of mzde" >&2
         exit 1
       fi
       if ! out=$(nix build --no-link --print-out-paths .#screenshots); then

@@ -2,7 +2,7 @@
   lib,
   pkgs,
   config,
-  mzwmInputs,
+  mzdeInputs,
   ...
 }:
 # rofi with the menu style of win-classic-theme. The theme of each scheme has
@@ -10,15 +10,15 @@
 # in win-classic-theme.
 let
   winTheme = config.programs.win-classic-theme;
-  cfg = config.mzwm;
+  cfg = config.mzde;
 
   # rofi with the patch of pkgs/default.nix, and the plugins of
-  # mzwm.rofi.plugins.
+  # mzde.rofi.plugins.
   rofiBase = pkgs.rofi.override {
     inherit
       (import ../pkgs {
         inherit pkgs;
-        inputs = mzwmInputs;
+        inputs = mzdeInputs;
       })
       rofi-unwrapped
       ;
@@ -99,7 +99,7 @@ let
 in
 {
   config = lib.mkMerge [
-    { mzwm.rofi.package = mz-rofi; }
+    { mzde.rofi.package = mz-rofi; }
     (lib.mkIf cfg.enable {
       home-manager.sharedModules = [
         {

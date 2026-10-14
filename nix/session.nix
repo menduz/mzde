@@ -7,7 +7,7 @@
 # The session: the target that starts the session programs, the script that
 # starts it, and the media keys.
 let
-  cfg = config.mzwm;
+  cfg = config.mzde;
 
   mz-after-systemd = pkgs.writeShellScriptBin "mz-after-systemd" ''
     # Import the WAYLAND_DISPLAY env var from the compositor into the systemd user session.
@@ -103,14 +103,14 @@ let
 in
 {
   config = lib.mkMerge [
-    { mzwm.sessionHook = mz-after-systemd; }
+    { mzde.sessionHook = mz-after-systemd; }
     (lib.mkIf cfg.enable {
       # river has its own Xwayland. Qt programs and the gtk2 platform theme of Qt
       # need it.
       programs.xwayland.enable = lib.mkForce false;
 
       # The media keys also work while the session is locked.
-      mzwm.bindings = lib.mapAttrs (_: entry: {
+      mzde.bindings = lib.mapAttrs (_: entry: {
         command = lib.elemAt entry 0;
         description = lib.elemAt entry 1;
         whenLocked = true;

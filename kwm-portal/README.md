@@ -133,7 +133,7 @@ include these paths in the NixOS configuration, as required by Home Manager:
 environment.pathsToLink = [ "/share/xdg-desktop-portal" "/share/applications" ];
 ```
 
-In mzwm, `nix/nixos.nix` imports the NixOS module and enables it by default.
+In mzde, `nix/nixos.nix` imports the NixOS module and enables it by default.
 The GTK/wlr backends remain configured alongside it. The idle limitation
 described above still applies. Rebuild the system to activate configuration changes.
 

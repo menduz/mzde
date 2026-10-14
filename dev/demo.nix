@@ -1,4 +1,4 @@
-# The demo system of the screenshots: mzwm with the theme settings of
+# The demo system of the screenshots: mzde with the theme settings of
 # nix-config, the configuration of its author. The argument is the variant of
 # the theme: "dark" or "light".
 variant:
@@ -34,7 +34,7 @@ in
   # The theme draws with the first sans serif font.
   fonts.fontconfig.defaultFonts.sansSerif = [ "Inter" ];
 
-  mzwm.enable = true;
+  mzde.enable = true;
   programs.win-classic-theme = theme;
   home-manager.sharedModules = [ { programs.win-classic-theme = theme; } ];
 }

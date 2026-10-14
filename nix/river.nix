@@ -2,7 +2,7 @@
   pkgs,
   lib,
   config,
-  mzwmInputs,
+  mzdeInputs,
   ...
 }:
 # river5: river from the main branch (0.6.0-dev, after the release of 0.5.0) with the kwm window manager.
@@ -13,7 +13,7 @@
 # kwim, and kwim configures the input devices. Refer to nix/default.nix in
 # the river and kwm repositories, and to pkgs/kwim.nix.
 #
-# This module configures only the window manager. It reads the mzwm options and
+# This module configures only the window manager. It reads the mzde options and
 # writes $XDG_CONFIG_HOME/river/init, $XDG_CONFIG_HOME/kwm/config.zon and
 # $XDG_CONFIG_HOME/kwim/config.zon, and the user service kwm.service.
 # session.nix gives the session target and the media keys.
@@ -27,7 +27,7 @@
 #     pkgs/default.nix).
 #   - kwm moves a window to an other output without the tags of that output.
 let
-  cfg = config.mzwm;
+  cfg = config.mzde;
   inherit (cfg) colors;
   zon = import ./zon.nix { inherit lib; };
   inherit (zon) rgba;
@@ -36,7 +36,7 @@ let
   # theme of Qt.
   packages = import ../pkgs {
     inherit pkgs;
-    inputs = mzwmInputs;
+    inputs = mzdeInputs;
   };
   inherit (packages) river kwm kwim;
 
@@ -57,7 +57,7 @@ let
         if names ? ${name} then
           lib.nameValuePair names.${name} true
         else
-          throw "river5: unknown modifier `${name}`. Refer to the description of mzwm.bindings.";
+          throw "river5: unknown modifier `${name}`. Refer to the description of mzde.bindings.";
     in
     lib.listToAttrs (map toField (lib.remove "None" (lib.splitString "+" text)));
 
@@ -550,7 +550,7 @@ let
   # this marker. kwm runs startup_cmds at each start: at the start of the
   # session, at "systemctl --user restart kwm", and in a nested river. Only the
   # first run in a session finds the marker. Thus a restart of kwm does not
-  # start mzwm.sessionTarget again, and a nested river does not change the
+  # start mzde.sessionTarget again, and a nested river does not change the
   # current session.
   startupMarker = "$XDG_RUNTIME_DIR/river5-startup-$WAYLAND_DISPLAY";
 
@@ -564,7 +564,7 @@ let
 
     ${lib.concatMapStringsSep "\n" (command: "${command} &") cfg.startupCommands}
 
-    # Starts mzwm.sessionTarget, and thus the session programs.
+    # Starts mzde.sessionTarget, and thus the session programs.
     exec ${cfg.sessionHook}/bin/mz-after-systemd
   '';
 
