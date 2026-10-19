@@ -269,9 +269,9 @@ let
         "{config}"
         "bindings"
       ];
-      delay = 2000;
+      delay = 1500;
       # Terminus at 12 pixels has no bold face. The chords are bold.
-      font = "Iosevka:size=10";
+      font = "Terminus:size=12";
     };
     # The color of the desktop, below the windows: desktop_color of
     # xfwm4/themerc of the current GTK theme (win-classic). kwm follows each
