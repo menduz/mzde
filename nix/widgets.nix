@@ -4,10 +4,10 @@
   config,
   ...
 }:
-# The widgets of the kwm bar: the meters of kwm (memory, clock, CPU, battery,
-# disk usage) and script widgets. Each script writes JSON lines with "text",
-# "tooltip" and "class", the format of waybar custom modules. Refer to
-# src/config/widget.zig in kwm.
+# The widgets of the kwm bar: the meters of kwm (memory, clock, CPU,
+# temperature, battery, disk usage) and script widgets. Each script writes
+# JSON lines with "text", "tooltip" and "class", the format of waybar custom
+# modules. Refer to src/config/widget.zig in kwm.
 #
 # Other modules add widgets with mzde.bar.center, mzde.bar.right and
 # mzde.bar.end. Refer to options.nix.
@@ -414,6 +414,16 @@ in
       ])
     ];
     mzde.bar.right = lib.mkOrder 900 [
+      # The temperature of the hottest sensor, for example "41C". The tooltip
+      # has all the sensors. Options in mzde.bar.temperature.
+      {
+        temperature = {
+          format = zon.enum "celsius";
+          on_click = btop;
+          inherit (cfg.bar.temperature) ignore;
+          nvidia_smi = cfg.bar.temperature.nvidiaSmi;
+        };
+      }
       # ☕ when a lock blocks sleep. The tooltip is the list of locks.
       (cfg.lib.scriptWidget {
         exec = lib.getExe sleepInhibitStatus;

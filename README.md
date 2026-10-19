@@ -9,9 +9,9 @@ screen locker.
 ![mzde with the dark scheme](screenshots/dark.png)
 ![mzde with the light scheme](screenshots/light.png)
 
-- The kwm bar: tags, layout, title, memory, clock, CPU, busy disks, privacy
-  (microphone and camera), sleep inhibitors, media, docker, battery, disk
-  usage, the notifications of dunst, and the system tray
+- The kwm bar: tags, layout, title, memory, clock, CPU, temperature, busy
+  disks, privacy (microphone and camera), sleep inhibitors, media, docker,
+  battery, disk usage, the notifications of dunst, and the system tray
   (`nix/widgets.nix`).
 - Key bindings with an overlay: hold Super for 2 seconds.
 - rofi menus as modal dialogs in the style of the theme (`mz-rofi`).

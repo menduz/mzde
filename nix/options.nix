@@ -202,6 +202,28 @@ in
       center = widgets "center";
       right = widgets "right part";
       end = widgets "right end, after the tray";
+
+      temperature = {
+        ignore = lib.mkOption {
+          type = lib.types.listOf lib.types.str;
+          default = [ ];
+          example = [ "legion_hwmon" ];
+          description = ''
+            The hwmon devices (the file `name` in /sys/class/hwmon/hwmon*)
+            that the temperature meter ignores, for example a sensor that
+            gives wrong values.
+          '';
+        };
+        nvidiaSmi = lib.mkOption {
+          type = lib.types.bool;
+          default = false;
+          description = ''
+            The temperature meter also shows the NVIDIA GPUs with nvidia-smi.
+            The NVIDIA driver has no hwmon device. kwm does not start
+            nvidia-smi while the GPUs sleep (runtime D3).
+          '';
+        };
+      };
     };
 
     kwm.settings = lib.mkOption {
