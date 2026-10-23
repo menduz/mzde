@@ -237,6 +237,16 @@ let
     smart_gaps = true;
     cursor_warp = zon.enum "none";
     auto_swallow = false;
+    # A drag of a tiled window by its title bar makes it floating after 32
+    # pixels. A floating window that the pointer holds at the master edge of
+    # the output (or at the opposite edge) shows the drop: the other windows
+    # take their places after it, and a rectangle in the focus color shows the
+    # place of the window. Refer to src/kwm/drag.zig in kwm/.
+    drag.preview = {
+      fill = zon.hex "${lib.removePrefix "#" colors.border.focus}40";
+      outline = rgba colors.border.focus;
+      outline_width = 2;
+    };
     # kwm always asks for server side decorations; only a client without
     # xdg-decoration (GTK3, GTK4) draws its own. A window with server side
     # decorations that is not maximized gets a title bar with a close button,
