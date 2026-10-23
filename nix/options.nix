@@ -223,6 +223,24 @@ in
             nvidia-smi while the GPUs sleep (runtime D3).
           '';
         };
+        show = lib.mkOption {
+          type = lib.types.nullOr lib.types.ints.unsigned;
+          default = 60;
+          description = ''
+            Degrees Celsius: the temperature shows only when the hottest
+            sensor is at this temperature or more. null: always.
+          '';
+        };
+        warning = lib.mkOption {
+          type = lib.types.ints.between 0 100;
+          default = 75;
+          description = "Degrees Celsius of the warning color (orange).";
+        };
+        critical = lib.mkOption {
+          type = lib.types.ints.between 0 100;
+          default = 90;
+          description = "Degrees Celsius of the critical color (red).";
+        };
       };
     };
 

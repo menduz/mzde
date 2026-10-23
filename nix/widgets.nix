@@ -414,14 +414,20 @@ in
       ])
     ];
     mzde.bar.right = lib.mkOrder 900 [
-      # The temperature of the hottest sensor, for example "41C". The tooltip
-      # has all the sensors. Options in mzde.bar.temperature.
+      # The temperature of the hottest sensor, for example "41C", from
+      # mzde.bar.temperature.show degrees. The tooltip has all the sensors.
+      # Options in mzde.bar.temperature.
       {
         temperature = {
           format = zon.enum "celsius";
           on_click = btop;
-          inherit (cfg.bar.temperature) ignore;
+          inherit (cfg.bar.temperature) ignore show;
           nvidia_smi = cfg.bar.temperature.nvidiaSmi;
+          # kwm gives the colors at a percentage of the range from low to
+          # high. From 0 to 100 degrees, the percentage is the temperature.
+          low = 0;
+          high = 100;
+          inherit (cfg.bar.temperature) warning critical;
         };
       }
       # ☕ when a lock blocks sleep. The tooltip is the list of locks.
