@@ -17,7 +17,8 @@ let
 
   btop = "${cfg.terminal} -e ${pkgs.btop}/bin/btop --preset 2 -u 100";
 
-  # The kwm widget "☕": it shows when a lock blocks sleep. The tooltip is the
+  # The kwm widget "eye" (U+F06E, fa-eye of Font Awesome, also in the Nerd
+  # Font symbols): it shows when a lock blocks sleep. The tooltip is the
   # list of locks. A "delay" lock does not block sleep. NetworkManager and
   # UPower always have one.
   sleepInhibitStatus = pkgs.writeShellApplication {
@@ -29,7 +30,7 @@ let
     text = ''
       if systemd-inhibit --list --no-pager --json=short \
         | jq -e 'any(.[]; .mode == "block" and any(.what | split(":")[]; . == "sleep"))' >/dev/null; then
-        systemd-inhibit --list --no-pager | jq -Rsc '{text: " ☕ ", tooltip: rtrimstr("\n")}'
+        systemd-inhibit --list --no-pager | jq -Rsc '{text: " \uf06e ", tooltip: rtrimstr("\n")}'
       else
         echo '{"text": ""}'
       fi
@@ -430,7 +431,7 @@ in
           inherit (cfg.bar.temperature) warning critical;
         };
       }
-      # ☕ when a lock blocks sleep. The tooltip is the list of locks.
+      # An eye when a lock blocks sleep. The tooltip is the list of locks.
       (cfg.lib.scriptWidget {
         exec = lib.getExe sleepInhibitStatus;
         interval = 5000;
