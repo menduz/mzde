@@ -413,6 +413,10 @@ let
         # Use the Papirus-only symbolic theme for the tray.
         icon_theme = "SE98-Papirus-Symbolic";
         spacing = colors.spacing;
+        # Only the symbolic icons and the items that need attention show; the
+        # pointer on the tray shows the other items. Refer to
+        # src/kwm/tray_collapse.zig in kwm/.
+        collapse = true;
         # The menus of the items in rofi, at the top right corner of the
         # screen below the bar. kwm replaces {title} and {y} (the bottom of
         # the bar). These menus are not modal.
