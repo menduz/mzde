@@ -296,8 +296,9 @@ let
       # the vertical center.
       min_height = colors.iconSize + 4;
       scheme = {
-        # The whole bar has one background color, black. A brighter text color
-        # shows the selected tag and the title of the focused output.
+        # The whole bar has one background color. A brighter text color
+        # shows the selected tag and the title of the focused output. These
+        # are the colors without a GTK theme; refer to gtk_colors below.
         normal = {
           fg = rgba colors.bar.foreground;
           bg = rgba colors.bar.background;
@@ -307,6 +308,12 @@ let
           bg = rgba colors.bar.background;
         };
       };
+
+      # The colors of the bar, of the selected tag and of the tags without
+      # windows come from xfwm4/themerc of the current GTK theme
+      # (win-classic: barbg, barfg, barselectedfg and baremptyfg of the
+      # scheme). kwm follows each change of toggle-theme.
+      gtk_colors = { };
 
       tags = {
         tags = map toString (lib.range 1 9);
