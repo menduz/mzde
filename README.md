@@ -9,7 +9,7 @@ screen locker.
 ![mzde with the dark scheme](screenshots/dark.png)
 ![mzde with the light scheme](screenshots/light.png)
 
-- The kwm bar: tags, layout, title, memory, clock, CPU, temperature, busy
+- The kwm bar: tags, layout, title, a gauge of memory and CPU, clock, temperature, busy
   disks, privacy (microphone and camera), sleep inhibitors, media, docker,
   battery, disk usage, the notifications of dunst, and the system tray
   (`nix/widgets.nix`).

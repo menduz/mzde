@@ -383,24 +383,10 @@ in
 {
   config = lib.mkIf cfg.enable {
     # The widgets of mzde. Other widgets without an order go between the
-    # disk widget and the privacy widget in the center, after the disk usage
-    # at the right, and before the notifications at the end.
+    # busy disks and the privacy widget in the center, after the disk usage
+    # at the right, and between the clock and the notifications at the end.
     mzde.bar.center = lib.mkMerge [
-      # A click on the memory or CPU meter starts btop.
       (lib.mkOrder 900 [
-        {
-          memory = {
-            format = zon.enum "braille";
-            on_click = btop;
-          };
-        }
-        { clock = { }; }
-        {
-          cpu = {
-            format = zon.enum "braille";
-            on_click = btop;
-          };
-        }
         # The disks that are busy 75% of the time or more. Empty when no disk
         # is that busy.
         (cfg.lib.scriptWidget {
@@ -464,13 +450,31 @@ in
         };
       }
     ];
-    # At the right of the tray: the notification dot of dunst. Its tooltip
-    # holds the last notifications. It has no click command.
-    mzde.bar.end = lib.mkOrder 1100 [
-      (cfg.lib.scriptWidget {
-        exec = lib.getExe notification-status;
-        interval = 5000;
-      })
+    mzde.bar.end = lib.mkMerge [
+      # At the right of the tray: a gauge with a bar for the memory and a
+      # bar for the CPU use, then the clock. The tooltip of the gauge has
+      # both values. A click on the gauge starts btop. Refer to
+      # src/kwm/gauge.zig in kwm/.
+      (lib.mkOrder 900 [
+        {
+          gauge = {
+            bars = [
+              (zon.enum "memory")
+              (zon.enum "cpu")
+            ];
+            on_click = btop;
+          };
+        }
+        { clock = { }; }
+      ])
+      # At the right end: the notification dot of dunst. Its tooltip holds
+      # the last notifications. It has no click command.
+      (lib.mkOrder 1100 [
+        (cfg.lib.scriptWidget {
+          exec = lib.getExe notification-status;
+          interval = 5000;
+        })
+      ])
     ];
 
     home-manager.sharedModules = [ { home.packages = [ notification-status ]; } ];
