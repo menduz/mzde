@@ -59,6 +59,26 @@ let
     fi
   '';
 
+  # Runs mzde.lidSwitch.close and mzde.lidSwitch.open when the lid state
+  # changes. UPower sends LidIsClosed in PropertiesChanged.
+  hasLidSwitch = cfg.lidSwitch.close != null || cfg.lidSwitch.open != null;
+  mz-lid-switch = pkgs.writeShellScriptBin "mz-lid-switch" ''
+    ${pkgs.glib}/bin/gdbus monitor --system \
+      --dest org.freedesktop.UPower --object-path /org/freedesktop/UPower |
+      while IFS= read -r line; do
+        case "$line" in
+          *"'LidIsClosed': <true>"*)
+            echo "lid closed"
+            ${lib.optionalString (cfg.lidSwitch.close != null) cfg.lidSwitch.close}
+            ;;
+          *"'LidIsClosed': <false>"*)
+            echo "lid open"
+            ${lib.optionalString (cfg.lidSwitch.open != null) cfg.lidSwitch.open}
+            ;;
+        esac
+      done
+  '';
+
   # The media keys: the command and the description.
   media = {
     "None XF86AudioRaiseVolume" = [
@@ -116,6 +136,8 @@ in
         whenLocked = true;
       }) media;
 
+      services.upower.enable = lib.mkIf hasLidSwitch (lib.mkDefault true);
+
       environment.systemPackages = [
         pkgs.playerctl
         pkgs.brightnessctl
@@ -142,6 +164,20 @@ in
                 "xdg-desktop-autostart.target"
               ];
             };
+          };
+
+          systemd.user.services.mz-lid-switch = lib.mkIf hasLidSwitch {
+            Unit = {
+              Description = "Run the lid switch commands of mzde";
+              PartOf = [ cfg.sessionTarget ];
+              After = [ cfg.sessionTarget ];
+            };
+            Service = {
+              ExecStart = lib.getExe mz-lid-switch;
+              Restart = "always";
+              RestartSec = 5;
+            };
+            Install.WantedBy = [ cfg.sessionTarget ];
           };
         }
       ];

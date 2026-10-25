@@ -100,6 +100,12 @@ in
     # autostart files, so force them to run the service
     services.xserver.desktopManager.runXdgAutostartIfNone = lib.mkDefault true;
 
+    # Without other commands, the lid turns the internal display off and on.
+    mzde.lidSwitch = {
+      close = lib.mkDefault (lib.getExe display-off);
+      open = lib.mkDefault (lib.getExe display-on);
+    };
+
     mzde.bindings = {
       "Super+Alt 1" = {
         command = lib.getExe scrn;

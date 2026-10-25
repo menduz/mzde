@@ -253,6 +253,22 @@ in
       '';
     };
 
+    # river does not send lid switch events to the window manager. A user
+    # service reads the lid state from UPower and runs these commands. The
+    # defaults turn eDP-1 off and on. Set both to null to stop the service.
+    lidSwitch = {
+      close = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = "A shell command that runs when the lid closes.";
+      };
+      open = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = "A shell command that runs when the lid opens.";
+      };
+    };
+
     lock = {
       afterUnlock = lib.mkOption {
         type = lib.types.nullOr lib.types.str;

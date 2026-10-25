@@ -19,7 +19,8 @@
 # session.nix gives the session target and the media keys.
 #
 # Notes:
-#   - river 0.5 does not send lid switch events to the window manager.
+#   - river 0.5 does not send lid switch events to the window manager. The
+#     user service mz-lid-switch (session.nix) reads the lid from UPower.
 #   - river 0.5 does not have river-status-unstable-v1, thus there is no waybar.
 #     The bar of kwm at the top shows the tags, the layout, the window title,
 #     the widgets of the kwm fork and the tray.
