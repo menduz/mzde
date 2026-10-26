@@ -382,25 +382,21 @@ let
 in
 {
   config = lib.mkIf cfg.enable {
-    # The widgets of mzde. Other widgets without an order go between the
-    # busy disks and the privacy widget in the center, after the disk usage
-    # at the right, and between the clock and the notifications at the end.
-    mzde.bar.center = lib.mkMerge [
-      (lib.mkOrder 900 [
-        # The disks that are busy 75% of the time or more. Empty when no disk
-        # is that busy.
-        (cfg.lib.scriptWidget {
-          exec = lib.getExe busy-status;
-          onClick = btop;
-        })
-      ])
-      # The microphone and the camera flash red while a program uses them.
-      # The script writes a line for each change.
-      (lib.mkOrder 1100 [
-        (cfg.lib.scriptWidget { exec = lib.getExe privacyStatus; })
-      ])
+    # The widgets of mzde. Other widgets without an order go after the busy
+    # disks in the center, after the disk usage at the right, and between
+    # the clock and the notifications at the end.
+    mzde.bar.center = lib.mkOrder 900 [
+      # The disks that are busy 75% of the time or more. Empty when no disk
+      # is that busy.
+      (cfg.lib.scriptWidget {
+        exec = lib.getExe busy-status;
+        onClick = btop;
+      })
     ];
     mzde.bar.right = lib.mkOrder 900 [
+      # The microphone and the camera flash red while a program uses them.
+      # The script writes a line for each change.
+      (cfg.lib.scriptWidget { exec = lib.getExe privacyStatus; })
       # The temperature of the hottest sensor, for example "41C", from
       # mzde.bar.temperature.show degrees. The tooltip has all the sensors.
       # Options in mzde.bar.temperature.

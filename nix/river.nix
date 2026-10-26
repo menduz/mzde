@@ -330,8 +330,6 @@ let
         tags = map toString (lib.range 1 9);
         # Tags without windows are dim.
         empty_fg = rgba colors.bar.emptyTag;
-        # The selected tag has the color of the desktop.
-        select_bg_desktop = true;
         # kwm puts the clicked tag in place of 0.
         click = {
           left.set_output_tag.tag.tag = 0;
@@ -393,7 +391,14 @@ let
         };
       };
 
-      title.click.left.zoom.swap = false;
+      title = {
+        # The title has the colors of the title bar of the focused window
+        # (win-classic), with the gradient, without a border. kwm shows the
+        # title only while the focused window has no title bar (maximized,
+        # fullscreen, alone, monocle, or with its own title bar).
+        caption = true;
+        click.left.zoom.swap = false;
+      };
 
       # The widgets of the kwm fork take the place of the status text.
       status = null;
