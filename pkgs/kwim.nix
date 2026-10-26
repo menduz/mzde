@@ -1,7 +1,8 @@
 # Builds kwim, the input manager of kwm. kwim sets the libinput and xkb options
 # of the input devices through river-input-management-v1. kwm starts kwim, and
 # kwim reads the input rules from the kwm configuration.
-# Refer to https://github.com/kewuaa/kwim.
+# The source is the fork https://github.com/menduz/kwim of
+# https://github.com/kewuaa/kwim.
 #
 # After an update of the kwim input, the hash of the Zig dependencies can
 # change. Then the build fails and shows the new hash. Put that hash below.

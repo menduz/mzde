@@ -88,3 +88,8 @@ reproducible.
 
 `nix build .#checks.x86_64-linux.lock-prompt` tests the patches of river and
 waylock: the password prompt stays in the center after a change of the output.
+
+`nix build .#checks.x86_64-linux.kwim-apply` tests the patch of kwim: kwim
+waits until river applies its settings, also when river is slow (as after a
+resume). A river in a river gives kwim a real keyboard, and the test reads its
+key repeat.

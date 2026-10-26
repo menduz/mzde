@@ -24,17 +24,18 @@
     "kwim": {
       "flake": false,
       "locked": {
-        "lastModified": 1786366981,
-        "narHash": "sha256-Ob59H1535EYReXMCERdlTNfhwv2GGBCSCmvfIeJzzzo=",
-        "owner": "kewuaa",
-        "repo": "kwim",
-        "rev": "becc1284ccc8c5abdfb8a117b561a97f4448e9dd",
-        "type": "github"
+        "lastModified": 1793023243,
+        "narHash": "sha256-dOfvi6kY4ruAj+XKYtZg9wDMBWtD4VpSI45ss8+3U5A=",
+        "ref": "refs/heads/master",
+        "rev": "c34021d0dee4b4c5a5b671a63e376e84b26bea32",
+        "revCount": 78,
+        "type": "git",
+        "url": "https://github.com/menduz/kwim.git"
       },
       "original": {
-        "owner": "kewuaa",
-        "repo": "kwim",
-        "type": "github"
+        "ref": "master",
+        "type": "git",
+        "url": "https://github.com/menduz/kwim.git"
       }
     },
     "kwm": {

@@ -16,9 +16,10 @@
       url = "git+https://github.com/menduz/kwm.git?ref=master";
       flake = false;
     };
-    # kwm starts kwim. kwim configures the input devices.
+    # kwm starts kwim. kwim configures the input devices. The fork
+    # menduz/kwim of kewuaa/kwim waits until river applies the settings.
     kwim = {
-      url = "github:kewuaa/kwim";
+      url = "git+https://github.com/menduz/kwim.git?ref=master";
       flake = false;
     };
     # The screen locker: the fork menduz/waylock, with a password prompt.
@@ -97,6 +98,11 @@
           # output. It tests the patches of river and waylock.
           lock-prompt = pkgs.callPackage ./tests/lock-prompt.nix {
             inherit (p) river kwm waylock;
+          };
+          # kwim applies its settings when river is slow, as after a
+          # resume. It tests the patch of kwim.
+          kwim-apply = pkgs.callPackage ./tests/kwim-apply.nix {
+            inherit (p) river kwm kwim;
           };
         };
 
