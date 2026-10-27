@@ -296,13 +296,8 @@ let
     bar = {
       show_default = true;
       position = zon.enum "top";
-      # A fontconfig pattern for fcft. kwm uses
-      # "monospace" for glyphs that Terminus does not have, for example braille.
-      #
-      # A size in points, not in pixels: kwm loads the font of each bar with the
-      # DPI of its output, 96 times the scale. Thus 9 points give 12 pixels at
-      # scale 1 and 24 pixels at scale 2. Terminus has these bitmap sizes.
-      font = "Terminus:size=9";
+      # A fontconfig pattern for fcft. Refer to mzde.bar.font.
+      font = "${cfg.bar.font.family}:size=${toString cfg.bar.font.size}";
       # The tray icons are 16 px, with 2 px above and below. The text is in
       # the vertical center.
       min_height = colors.iconSize + 4;

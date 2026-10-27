@@ -203,6 +203,29 @@ in
       right = widgets "right part";
       end = widgets "right end, after the tray";
 
+      font = {
+        family = lib.mkOption {
+          type = lib.types.str;
+          default = "Terminus";
+          description = ''
+            The font family of the bar and of its tooltips. kwm uses
+            "monospace" for glyphs that this font does not have, for example
+            braille. Other programs can use the same font, for example the
+            notifications: "''${family} ''${toString size}" is a Pango font.
+          '';
+        };
+        size = lib.mkOption {
+          type = lib.types.ints.positive;
+          default = 9;
+          description = ''
+            The size in points, not in pixels: kwm loads the font of each bar
+            with the DPI of its output, 96 times the scale. Thus 9 points give
+            12 pixels at scale 1 and 24 pixels at scale 2. Terminus has these
+            bitmap sizes.
+          '';
+        };
+      };
+
       temperature = {
         ignore = lib.mkOption {
           type = lib.types.listOf lib.types.str;
