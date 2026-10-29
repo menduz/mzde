@@ -164,8 +164,9 @@ let
     '';
   };
 
-  # The kwm privacy widget: a microphone and a camera that flash red while a
-  # program uses them.
+  # The kwm privacy widget: "CAM" and "MIC" in the font of the bar, white on
+  # a red fill that flashes, while a program uses the camera or the
+  # microphone (the class "badge" of kwm).
   #   - Microphone: the PipeWire capture streams (Stream/Input/Audio) that
   #     run. The monitor streams and the peak meters of pavucontrol do not
   #     count.
@@ -187,9 +188,6 @@ let
     text = ''
       # kwm stops the script with SIGTERM. Stop the pipelines too.
       trap 'trap - TERM EXIT; kill 0 2>/dev/null' TERM EXIT
-
-      mic_icon=$'\U000F036C'
-      cam_icon=$'\U000F05A0'
 
       # One line "pw {"mic": [...], "cam": [...]}" for each change in PipeWire.
       pipewire_streams() {
@@ -252,14 +250,14 @@ let
           continue
         fi
         last=$state
-        jq -nc --argjson s "$state" --arg mic "$mic_icon" --arg cam "$cam_icon" '
+        jq -nc --argjson s "$state" '
           if ($s.mic | length) + ($s.cam | length) == 0 then {text: ""}
           else {
-            text: ([ (if ($s.mic | length) > 0 then $mic else empty end),
-                     (if ($s.cam | length) > 0 then $cam else empty end) ] | join(" ")),
+            text: ([ (if ($s.cam | length) > 0 then "CAM" else empty end),
+                     (if ($s.mic | length) > 0 then "MIC" else empty end) ] | join(" ")),
             tooltip: ([ (if ($s.mic | length) > 0 then "Microphone: " + ($s.mic | join(", ")) else empty end),
                         (if ($s.cam | length) > 0 then "Camera: " + ($s.cam | join(", ")) else empty end) ] | join("\n")),
-            class: ["critical", "blink"]
+            class: ["critical", "badge", "blink"]
           } end'
       done
     '';
@@ -394,7 +392,8 @@ in
       })
     ];
     mzde.bar.right = lib.mkOrder 900 [
-      # The microphone and the camera flash red while a program uses them.
+      # "CAM" and "MIC", white on a flashing red fill, while a program uses
+      # the camera or the microphone.
       # The script writes a line for each change.
       (cfg.lib.scriptWidget { exec = lib.getExe privacyStatus; })
       # The temperature of the hottest sensor, for example "41C", from
