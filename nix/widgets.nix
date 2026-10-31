@@ -20,17 +20,24 @@ let
   # The kwm widget "eye" (U+F06E, fa-eye of Font Awesome, also in the Nerd
   # Font symbols): it shows when a lock blocks sleep. The tooltip is the
   # list of locks. A "delay" lock does not block sleep. NetworkManager and
-  # UPower always have one.
+  # UPower always have one. The eye does not show while the media widget
+  # shows (a player is there, see mprisStatus): a player that plays usually
+  # holds the lock, and the two widgets are adjacent.
   sleepInhibitStatus = pkgs.writeShellApplication {
     name = "sleep-inhibit-status";
     runtimeInputs = [
       config.systemd.package
       pkgs.jq
+      pkgs.playerctl
+      pkgs.gnugrep
     ];
     text = ''
-      if systemd-inhibit --list --no-pager --json=short \
+      players=$(playerctl -a metadata --format '{{playerInstance}}' 2>/dev/null | grep -vx playerctld || true)
+      if [ -n "$players" ]; then
+        echo '{"text": ""}'
+      elif systemd-inhibit --list --no-pager --json=short \
         | jq -e 'any(.[]; .mode == "block" and any(.what | split(":")[]; . == "sleep"))' >/dev/null; then
-        systemd-inhibit --list --no-pager | jq -Rsc '{text: " \uf06e ", tooltip: rtrimstr("\n")}'
+        systemd-inhibit --list --no-pager | jq -Rsc '{text: " \uf06e ", class: "accent", tooltip: rtrimstr("\n")}'
       else
         echo '{"text": ""}'
       fi
@@ -146,7 +153,13 @@ let
             else
               ($players | map(.name | length) | max) as $width
               | {
-                  text: (if any($players[]; .status == "Playing") then "▶" else "⏸" end),
+                  # A symbolic icon of the icon theme of the tray, in the
+                  # accent color of kwm (class "accent"). Refer to
+                  # src/kwm/widgets/script.zig in kwm/.
+                  icon: (if any($players[]; .status == "Playing")
+                         then "media-playback-start-symbolic"
+                         else "media-playback-pause-symbolic" end),
+                  class: "accent",
                   tooltip: ($players | map("\(icon) \(.name)\(" " * ($width - (.name | length) + 2))\(track)") | join("\n")),
                   tooltip_on_click: ($players | map("\($ctl) toggle \(.player | @sh)"))
                 }
@@ -353,36 +366,55 @@ let
     '';
   };
 
-  # Prints one JSON line with "text", "tooltip" and "class", the format of
-  # waybar custom modules. The kwm bar shows the text, and the tooltip holds
-  # the number of notifications and the last 10 of the history.
-  notification-status = pkgs.writeShellScriptBin "notification-status" ''
-    history=$(${pkgs.dunst}/bin/dunstctl history 2>/dev/null) || history='{"data":[[]]}'
-    printf '%s' "$history" | ${pkgs.jq}/bin/jq -c '
-      (.data[0] // []) as $items
-      | if ($items | length) == 0 then
-          { text: "●", tooltip: "No notifications", class: "" }
-        else
-          {
-            text: "●",
-            class: "has-notifications",
-            tooltip: (
-              [ "\($items | length) notifications" ]
-              + [ $items[:10][]
-                  | "\(.appname.data): \(.summary.data)"
-                    + (if (.body.data // "") == "" then ""
-                       else " — " + (.body.data | gsub("\\s+"; " ")) end) ]
-              | join("\n")
-            )
-          }
-        end'
-  '';
+  # The clock and the notifications of dunst in one kwm widget: the time
+  # (the format of the clock widget of kwm), then a dot while dunst keeps
+  # notifications. The tooltip has the date, the number of notifications and
+  # the last 10 of the history. The script wakes at each minute and every 5
+  # seconds, for the notifications.
+  clockStatus = pkgs.writeShellApplication {
+    name = "clock-status";
+    runtimeInputs = [
+      pkgs.dunst
+      pkgs.jq
+      pkgs.coreutils
+    ];
+    text = ''
+      last=""
+      while :; do
+        history=$(dunstctl history 2>/dev/null) || history='{"data":[[]]}'
+        line=$(printf '%s' "$history" | jq -c --arg time "$(date '+%a %d %H:%M')" --arg date "$(date '+%A %-d %B %Y')" '
+          (.data[0] // []) as $items
+          | {
+              text: $time,
+              tooltip: (
+                [ $date ]
+                + if ($items | length) == 0 then [ "No notifications" ]
+                  else
+                    [ "\($items | length) notifications" ]
+                    + [ $items[:10][]
+                        | "\(.appname.data): \(.summary.data)"
+                          + (if (.body.data // "") == "" then ""
+                             else " — " + (.body.data | gsub("\\s+"; " ")) end) ]
+                  end
+                | join("\n")
+              )
+            }')
+        if [ "$line" != "$last" ]; then
+          last=$line
+          printf '%s\n' "$line"
+        fi
+        # The next minute, or 5 seconds.
+        left=$((60 - 10#$(date +%S)))
+        sleep $((left < 5 ? left : 5))
+      done
+    '';
+  };
 in
 {
   config = lib.mkIf cfg.enable {
     # The widgets of mzde. Other widgets without an order go after the busy
     # disks in the center, after the disk usage at the right, and between
-    # the clock and the notifications at the end.
+    # the clock and the eye at the end.
     mzde.bar.center = lib.mkOrder 900 [
       # The disks that are busy 75% of the time or more. Empty when no disk
       # is that busy.
@@ -412,18 +444,6 @@ in
           inherit (cfg.bar.temperature) warning critical;
         };
       }
-      # An eye when a lock blocks sleep. The tooltip is the list of locks.
-      (cfg.lib.scriptWidget {
-        exec = lib.getExe sleepInhibitStatus;
-        interval = 5000;
-      })
-      # The media players. A click pauses all players that play, and the
-      # next click resumes one of them. A click on a line of the tooltip
-      # plays or pauses that player.
-      (cfg.lib.scriptWidget {
-        exec = lib.getExe mprisStatus;
-        onClick = "${lib.getExe mprisCtl} halt";
-      })
       # The number of docker containers that run. A click starts lazydocker.
       (cfg.lib.scriptWidget {
         exec = lib.getExe dockerStatus;
@@ -462,18 +482,27 @@ in
             on_click = btop;
           };
         }
-        { clock = { }; }
+        # The clock with the notifications of dunst: a dot while dunst
+        # keeps notifications, and the last ones in the tooltip.
+        (cfg.lib.scriptWidget { exec = lib.getExe clockStatus; })
       ])
-      # At the right end: the notification dot of dunst. Its tooltip holds
-      # the last notifications. It has no click command.
+      # The last widgets: the eye and the media players. Only one of the
+      # two shows.
       (lib.mkOrder 1100 [
+        # An eye in the accent color when a lock blocks sleep and no player
+        # is there. The tooltip is the list of locks.
         (cfg.lib.scriptWidget {
-          exec = lib.getExe notification-status;
+          exec = lib.getExe sleepInhibitStatus;
           interval = 5000;
+        })
+        # The media players, a play or pause icon. A click pauses all
+        # players that play, and the next click resumes one of them. A
+        # click on a line of the tooltip plays or pauses that player.
+        (cfg.lib.scriptWidget {
+          exec = lib.getExe mprisStatus;
+          onClick = "${lib.getExe mprisCtl} halt";
         })
       ])
     ];
-
-    home-manager.sharedModules = [ { home.packages = [ notification-status ]; } ];
   };
 }

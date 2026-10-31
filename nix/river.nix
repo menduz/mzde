@@ -380,6 +380,9 @@ let
       widget_colors = {
         warning = rgba colors.warning;
         critical = rgba colors.critical;
+        # The class "accent" of a script widget, for example the media
+        # players: the color of the focus border.
+        accent = rgba colors.border.focus;
       };
       # The tooltips show at once.
       tooltip_delay = 0;
