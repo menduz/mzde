@@ -325,6 +325,9 @@ let
         tags = map toString (lib.range 1 9);
         # Tags without windows are dim.
         empty_fg = rgba colors.bar.emptyTag;
+        # The mark of the selected tag shows the layout, and the pointer on
+        # it shows the menu of the layouts.
+        layout = true;
         # kwm puts the clicked tag in place of 0.
         click = {
           left.set_output_tag.tag.tag = 0;
@@ -351,40 +354,12 @@ let
         click.left.switch_mode.mode = "default";
       };
 
-      layout = {
-        # kwm puts the number of managed windows in place of {{?}}.
-        tags = {
-          tile = {
-            left = "[]=";
-            right = "=[]";
-            top = "[^]";
-            bottom = "[_]";
-          };
-          grid = {
-            horizontal = "|+|";
-            vertical = "|||";
-          };
-          monocle = "[{{=}}]";
-          deck = {
-            left = "[{{D}}]=";
-            right = "=[{{D}}]";
-            top = "[{{D}}^]";
-            bottom = "[{{D}}_]";
-          };
-          scroller = "[==]";
-          centered_master = {
-            horizontal = "=[]=";
-            vertical = "=[V]=";
-          };
-          float = "><>";
-        };
-        # cycle_layout is an action of the kwm fork. A click goes to the next
-        # layout, and a right click goes to the previous layout.
-        click = {
-          left.cycle_layout = forward;
-          right.cycle_layout = reverse;
-        };
-      };
+      # No layout area. The mark of the selected tag shows the layout (two
+      # columns: tile, three columns: centered master, two windows: float, a
+      # square: monocle). The pointer on the selected tag shows the menu of
+      # the layouts, and a quick second press of Super+N goes to the next
+      # layout. Refer to tags.layout, cycle_layouts and tag_repeat_cycle.
+      layout = null;
 
       title = {
         # The title has the colors of the title bar of the focused window
@@ -475,6 +450,17 @@ let
     sandbox.label = true;
 
     default_layout = zon.enum "tile";
+    # The layouts of the menu and of a quick second press of Super+N, in
+    # this order. grid, deck and scroller stay: only switch_layout selects
+    # them.
+    cycle_layouts = map zon.enum [
+      "tile"
+      "centered_master"
+      "float"
+      "monocle"
+    ];
+    # Milliseconds between the two presses of Super+N.
+    tag_repeat_cycle = 500;
     layout.tile = {
       nmaster = 1;
       mfact = 0.6;
