@@ -325,8 +325,8 @@ let
         tags = map toString (lib.range 1 9);
         # Tags without windows are dim.
         empty_fg = rgba colors.bar.emptyTag;
-        # The mark of the selected tag shows the layout, and the pointer on
-        # it shows the menu of the layouts.
+        # The mark of the selected tag shows the layout, and the pointer that
+        # enters it shows the menu of the layouts.
         layout = true;
         # kwm puts the clicked tag in place of 0.
         click = {
@@ -356,9 +356,11 @@ let
 
       # No layout area. The mark of the selected tag shows the layout (two
       # columns: tile, three columns: centered master, two windows: float, a
-      # square: monocle). The pointer on the selected tag shows the menu of
-      # the layouts, and a quick second press of Super+N goes to the next
-      # layout. Refer to tags.layout, cycle_layouts and tag_repeat_cycle.
+      # square: monocle). The pointer that enters the selected tag shows the
+      # menu of the layouts. A click on the selected tag goes to the next
+      # layout, a right click to the previous layout, and a quick second
+      # press of Super+N to the next layout. Refer to tags.layout,
+      # cycle_layouts and tag_repeat_cycle.
       layout = null;
 
       title = {
