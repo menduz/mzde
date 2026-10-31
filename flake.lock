@@ -91,11 +91,11 @@
     "river": {
       "flake": false,
       "locked": {
-        "lastModified": 1793298791,
-        "narHash": "sha256-R6KfkdoaszZEhrBdSRm8P6GOuV4rBHs5dBOCAyAWpQY=",
+        "lastModified": 1793457577,
+        "narHash": "sha256-CspUiQT3SWrKXy6y7Bz8J4RiyKobSupPuzWzsFptMnM=",
         "ref": "refs/heads/main",
-        "rev": "679062ca3910e1365a129644ce7323b299c13de8",
-        "revCount": 1803,
+        "rev": "2dd23a4166304fbf7098c95462a6a686b514e661",
+        "revCount": 1805,
         "type": "git",
         "url": "https://github.com/menduz/river.git"
       },
