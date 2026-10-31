@@ -437,7 +437,9 @@ in
           critical = 10;
         };
       }
-      # Shown when 80% of / is used, and red below 10 GB free.
+      # The file systems on local SSD and NVMe disks (no USB disks). The
+      # text is the smallest free space. The tooltip has a line for each
+      # file system. Shown when a disk is 80% used, red below 10 GB free.
       {
         disk = {
           show = 80;
