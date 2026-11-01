@@ -356,11 +356,10 @@ let
 
       # No layout area. The mark of the selected tag shows the layout (two
       # columns: tile, three columns: centered master, two windows: float, a
-      # square: monocle). The pointer that enters the selected tag shows the
-      # menu of the layouts. A click on the selected tag goes to the next
-      # layout, a right click to the previous layout, and a quick second
-      # press of Super+N to the next layout. Refer to tags.layout,
-      # cycle_layouts and tag_repeat_cycle.
+      # window with a title bar: monocle). The pointer that enters the
+      # selected tag, or a click on it, shows the menu of the layouts; a
+      # click on a line of the menu selects the layout. Refer to tags.layout
+      # and cycle_layouts.
       layout = null;
 
       title = {
@@ -455,17 +454,14 @@ let
     sandbox.label = true;
 
     default_layout = zon.enum "tile";
-    # The layouts of the menu and of a quick second press of Super+N, in
-    # this order. grid, deck and scroller stay: only switch_layout selects
-    # them.
+    # The layouts of the menu, in this order. grid, deck and scroller stay:
+    # only switch_layout selects them.
     cycle_layouts = map zon.enum [
       "tile"
       "centered_master"
       "float"
       "monocle"
     ];
-    # Milliseconds between the two presses of Super+N.
-    tag_repeat_cycle = 500;
     layout.tile = {
       nmaster = 1;
       mfact = 0.6;

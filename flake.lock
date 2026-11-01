@@ -41,11 +41,11 @@
     "kwm": {
       "flake": false,
       "locked": {
-        "lastModified": 1793459624,
-        "narHash": "sha256-yZLNeufUjdTb1aDEf86sjqYjMDY8KfGQ//P/GUfHxpw=",
+        "lastModified": 1793544632,
+        "narHash": "sha256-CiwPDhQG1JPGTR+OYDCRC9NT5HxqiYB0qhF2BgnzuXU=",
         "ref": "refs/heads/master",
-        "rev": "3e4b42116cd3d5318317afb028c452dfd27487a9",
-        "revCount": 727,
+        "rev": "e26ed9500790ce9a0cc5744713445943a58a7878",
+        "revCount": 728,
         "type": "git",
         "url": "https://github.com/menduz/kwm.git"
       },
