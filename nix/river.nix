@@ -267,8 +267,9 @@ let
       "-p"
       "{title}"
     ];
-    # Super down alone for 2 seconds: a band at the bottom of the focused
-    # output with the key bindings and their descriptions (`kwm bindings`).
+    # Super down for 1.5 seconds: a band at the bottom of the focused output
+    # with the key bindings and their descriptions (`kwm bindings`). With
+    # other modifiers down, only the bindings with these modifiers.
     # The colors are the tooltip colors of the GTK theme (win-classic), and
     # the chords have the color of the active title bar. Refer to overlay.zig
     # in kwm/.
@@ -279,6 +280,9 @@ let
         "-c"
         "{config}"
         "bindings"
+        # The modifiers that are down with Super: the band shows only
+        # their bindings.
+        "{modifiers}"
       ];
       delay = 1500;
       # Terminus at 12 pixels has no bold face. The chords are bold.
