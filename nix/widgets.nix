@@ -125,11 +125,15 @@ let
   # a player plays, else "⏸". The widget does not show without players. The
   # tooltip has a line for each player: the status, the name and
   # "artist - title". A click on a line plays or pauses that player.
+  # The icon has the accent color only when a lock blocks sleep (usually the
+  # player that plays holds it), else the color of the text.
   # "playerctl --follow" writes a line for each change. Then the script reads
-  # all players again.
+  # all players again. It also reads them every 5 seconds: a player can take
+  # or release the lock after the change.
   mprisStatus = pkgs.writeShellApplication {
     name = "mpris-status";
     runtimeInputs = [
+      config.systemd.package
       pkgs.playerctl
       pkgs.jq
     ];
@@ -140,8 +144,15 @@ let
       sep=$'\x1f'
       format="{{playerInstance}}$sep{{playerName}}$sep{{status}}$sep{{artist}}$sep{{title}}"
 
+      sleep_blocked() {
+        systemd-inhibit --list --no-pager --json=short 2>/dev/null \
+          | jq -e 'any(.[]; .mode == "block" and any(.what | split(":")[]; . == "sleep"))' >/dev/null \
+          && echo true || echo false
+      }
+
       status() {
-        { playerctl -a metadata --format "$format" 2>/dev/null || true; } | jq -Rsc --arg ctl "${lib.getExe mprisCtl}" '
+        { playerctl -a metadata --format "$format" 2>/dev/null || true; } \
+          | jq -Rsc --arg ctl "${lib.getExe mprisCtl}" --argjson blocked "$(sleep_blocked)" '
           def icon: if .status == "Playing" then "▶" elif .status == "Paused" then "⏸" else "■" end;
           def track:
             [.artist, .title | select(. != "")] | join(" - ")
@@ -153,13 +164,14 @@ let
             else
               ($players | map(.name | length) | max) as $width
               | {
-                  # A symbolic icon of the icon theme of the tray, in the
-                  # accent color of kwm (class "accent"). Refer to
+                  # A symbolic icon of the icon theme of the tray. In the
+                  # accent color of kwm (class "accent") when a lock blocks
+                  # sleep, else in the color of the text. Refer to
                   # src/kwm/widgets/script.zig in kwm/.
                   icon: (if any($players[]; .status == "Playing")
                          then "media-playback-start-symbolic"
                          else "media-playback-pause-symbolic" end),
-                  class: "accent",
+                  class: (if $blocked then "accent" else "" end),
                   tooltip: ($players | map("\(icon) \(.name)\(" " * ($width - (.name | length) + 2))\(track)") | join("\n")),
                   tooltip_on_click: ($players | map("\($ctl) toggle \(.player | @sh)"))
                 }
@@ -167,7 +179,9 @@ let
       }
 
       last=""
-      { echo; playerctl -a --follow metadata --format "$format" 2>/dev/null; } | while read -r _; do
+      { echo; playerctl -a --follow metadata --format "$format" 2>/dev/null; } | while :; do
+        # A status above 128: the timeout. Else the end of the input.
+        read -r -t 5 _ || [ $? -gt 128 ] || break
         line=$(status)
         if [ "$line" != "$last" ]; then
           last=$line
