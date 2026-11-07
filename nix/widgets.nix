@@ -457,9 +457,10 @@ in
           critical = 10;
         };
       }
-      # The file systems on local SSD and NVMe disks (no USB disks). The
-      # text is the smallest free space. The tooltip has a line for each
-      # file system. Shown when a disk is 80% used, red below 10 GB free.
+      # All the mounted file systems, but not the boot partition. The text
+      # is the smallest free space. The tooltip has a line for each file
+      # system. Shown when a file system is 80% used or has less than
+      # 10 GB free. Red below 10 GB free.
       {
         disk = {
           show = 80;
