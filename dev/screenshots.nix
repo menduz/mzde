@@ -115,8 +115,9 @@ let
     text = ''
       export FONTCONFIG_FILE=${fontsConf}
       export DBUS_SESSION_CONF=${pkgs.dbus}/share/dbus-1/session.conf
-      # Xfconf keeps the settings of Thunar. The bus starts it.
-      export EXTRA_DATA_DIRS=${pkgs.xfconf}/share:${pkgs.thunar}/share
+      # Xfconf keeps the settings of Thunar. The bus starts it. kwm finds the
+      # icon of Ghostty for its title bar from the desktop entry.
+      export EXTRA_DATA_DIRS=${pkgs.xfconf}/share:${pkgs.thunar}/share:${pkgs.ghostty}/share
       export FAKETIME_LIB=${pkgs.libfaketime}/lib/libfaketime.so.1
       export PRELOAD_LIB=${preload}/lib/screenshot-preload.so
       export TRAY_SCRIPT=${inputs.kwm}/nix/screenshot-tray.py
