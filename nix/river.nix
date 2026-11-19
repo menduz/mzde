@@ -90,6 +90,7 @@ let
   wm = description: action: { inherit description action; };
 
   windowManagerBindings = {
+    "Super equal" = wm "Arrange equally (1-2 tiled, 3+ floating)" (zon.enum "flex");
     "Super Q" = wm "Close the window" (zon.enum "close");
     "Super+Shift Space" = wm "Float or tile the window" (zon.enum "toggle_floating");
     "Super+Shift F" = wm "Fullscreen" {
@@ -224,9 +225,8 @@ let
   # The two 3D edges of win98 and 1 pixel of the face color outside them (no
   # outline).
   borderWidth = 3;
-  # kwm measures the gaps between the window contents, and the borders are in
-  # the gaps. These gaps keep the space of the borders of 2 pixels: 4 pixels
-  # between two borders, and 6 pixels between a border and the edge.
+  # Tile and the floating equalizer share these gaps between complete window
+  # frames. Borders and title bars fit inside each window's allocated space.
   innerGap = padding + 2 * (borderWidth - 2);
   outerGap = padding + (borderWidth - 2);
 

@@ -199,9 +199,12 @@ let
   #     count.
   #   - Camera: the PipeWire cameras and video streams that run, and the
   #     programs that open /dev/video* themselves (most browsers). An open or
-  #     a close of a video device starts a search in /proc.
+  #     a close of a video device starts a search in /proc. A process must
+  #     keep the device open for 0.5 seconds to count.
   # pw-dump --monitor and inotifywait wait for events, so the script uses no
   # CPU while nothing changes. kwm starts the script again when it stops.
+  # Each OFF -> ON transition also sends a notification with the executable
+  # basename and arguments of the processes using that device.
   privacyStatus = pkgs.writeShellApplication {
     name = "privacy-status";
     runtimeInputs = [
@@ -211,6 +214,7 @@ let
       pkgs.findutils
       pkgs.coreutils
       pkgs.gnused
+      pkgs.libnotify
     ];
     text = ''
       # kwm stops the script with SIGTERM. Stop the pipelines too.
@@ -219,21 +223,35 @@ let
       # One line "pw {"mic": [...], "cam": [...]}" for each change in PipeWire.
       pipewire_streams() {
         pw-dump --monitor --no-colors | jq -c --unbuffered -n '
-          foreach (inputs | .[]?) as $o ({};
-            ($o.id | tostring) as $k
-            | if $o.info == null then del(.[$k])
-              elif $o.type == "PipeWire:Interface:Node" or has($k) then .[$k] = ((.[$k] // {}) * $o.info)
-              else . end;
+          # Keep clients too: streams often carry only a client.id. Apply a
+          # whole update before emitting, including clients after their nodes.
+          foreach inputs as $batch ({};
+            reduce $batch[]? as $o (. ;
+              ($o.id | tostring) as $k
+              | if $o.info == null then del(.[$k])
+                elif $o.type == "PipeWire:Interface:Node" or $o.type == "PipeWire:Interface:Client" or has($k)
+                then .[$k] = ((.[$k] // {}) * $o.info)
+                else . end);
+            . as $objects
+            | def process:
+                . as $node
+                | ($objects[($node."client.id" | tostring)].props // {}) as $client
+                | ($client * $node) as $props
+                | {
+                    pid: ($props."application.process.id" // $client."pipewire.sec.pid" // "" | tostring),
+                    name: ($props."application.process.binary" // $props."application.name"
+                           // $props."node.description" // $props."node.name" // "Unknown process")
+                  };
             [ .[] | select(.state == "running") | .props // {} ] as $running
             | {
                 mic: [ $running[]
                        | select(."media.class" == "Stream/Input/Audio")
                        | select((."stream.monitor" // false | tostring) != "true")
                        | select(."media.name" != "Peak detect")
-                       | (."application.name" // ."node.name" // "?") ] | unique,
+                       | process ] | unique,
                 cam: [ $running[]
                        | select(."media.class" == "Video/Source" or ."media.class" == "Stream/Input/Video")
-                       | (."application.name" // ."node.description" // ."node.name" // "?") ] | unique
+                       | process ] | unique
               })' | sed -u 's/^/pw /'
       }
 
@@ -257,35 +275,101 @@ let
               comm=$(cat "/proc/$pid/comm" 2>/dev/null) || continue
               case $comm in
                 pipewire | wireplumber | pipewire-media-session) ;;
-                *) echo "$comm" ;;
+                *) jq -nc --arg pid "$pid" --arg name "$comm" '{pid: $pid, name: $name}' ;;
               esac
             done \
-          | jq -R . | jq -sc 'unique'
+          | jq -sc 'unique'
+      }
+
+      # Browsers open the video devices for some milliseconds to list them
+      # (navigator.mediaDevices.enumerateDevices), and do not capture. Count
+      # only the processes that keep a video device open for 0.5 seconds.
+      video_capturers() {
+        local first
+        first=$(video_users)
+        if [ "$first" = '[]' ]; then
+          echo '[]'
+          return
+        fi
+        sleep 0.5
+        jq -nc --argjson first "$first" --argjson now "$(video_users)" \
+          '[ $now[] | select(.pid as $pid | any($first[]; .pid == $pid)) ]'
+      }
+
+      # Read argv as NUL-separated fields, preserving spaces and quoting.
+      # The process may exit or be inaccessible between the event and here.
+      process_command() {
+        local pid=$1 fallback=$2 command
+        local -a argv=()
+        if [[ "$pid" =~ ^[0-9]+$ ]] \
+          && { mapfile -d "" -t argv <"/proc/$pid/cmdline"; } 2>/dev/null \
+          && [ "''${#argv[@]}" -gt 0 ]; then
+          # Chromium sets its process title: argv[0] is then the full command
+          # line, with spaces. Split it, else the name of the program is the
+          # text after the last "/" of all the arguments.
+          if [[ ''${argv[0]} == *" "* ]]; then
+            local -a title
+            read -ra title <<<"''${argv[0]}"
+            argv=("''${title[@]}" "''${argv[@]:1}")
+          fi
+          argv[0]=''${argv[0]##*/}
+          printf -v command '%q ' "''${argv[@]}"
+          printf '%s\n' "''${command% }"
+        else
+          printf '%s (command line unavailable)\n' "$fallback"
+        fi
+      }
+
+      notify_started() {
+        local previous=$1 current=$2 device title process pid name body
+        for device in cam mic; do
+          if ! jq -e --arg device "$device" --argjson old "$previous" \
+            '($old[$device] | length) == 0 and (.[$device] | length) > 0' \
+            <<<"$current" >/dev/null; then
+            continue
+          fi
+          case $device in
+            cam) title="Camera is in use (CAM)" ;;
+            mic) title="Microphone is in use (MIC)" ;;
+          esac
+          body=$(
+            while IFS= read -r process; do
+              pid=$(jq -r '.pid' <<<"$process")
+              name=$(jq -r '.name' <<<"$process")
+              process_command "$pid" "$name"
+            done < <(jq -c --arg device "$device" '.[$device][]' <<<"$current") \
+              | sort -u | jq -Rsr 'rtrimstr("\n") | @html'
+          )
+          # Notification failures must not stop the indicator. Keep stdout
+          # reserved for the JSON lines consumed by kwm.
+          notify-send -a "Privacy" "$title" "$body" >/dev/null || true
+        done
       }
 
       pw='{"mic": [], "cam": []}'
       dev='[]'
-      last=""
+      last='{"mic": [], "cam": []}'
       # When one source stops, stop all. kwm starts the script again.
       { pipewire_streams & video_events & wait -n; kill 0; } | while read -r kind data; do
         case $kind in
           pw) pw=$data ;;
-          dev) dev=$(video_users) ;;
+          dev) dev=$(video_capturers) ;;
         esac
         state=$(jq -nc --argjson pw "$pw" --argjson dev "$dev" '{mic: $pw.mic, cam: ($pw.cam + $dev | unique)}')
         if [ "$state" = "$last" ]; then
           continue
         fi
-        last=$state
         jq -nc --argjson s "$state" '
           if ($s.mic | length) + ($s.cam | length) == 0 then {text: ""}
           else {
             text: ([ (if ($s.cam | length) > 0 then "CAM" else empty end),
                      (if ($s.mic | length) > 0 then "MIC" else empty end) ] | join(" ")),
-            tooltip: ([ (if ($s.mic | length) > 0 then "Microphone: " + ($s.mic | join(", ")) else empty end),
-                        (if ($s.cam | length) > 0 then "Camera: " + ($s.cam | join(", ")) else empty end) ] | join("\n")),
+            tooltip: ([ (if ($s.mic | length) > 0 then "Microphone: " + ($s.mic | map(.name) | unique | join(", ")) else empty end),
+                        (if ($s.cam | length) > 0 then "Camera: " + ($s.cam | map(.name) | unique | join(", ")) else empty end) ] | join("\n")),
             class: ["critical", "badge", "blink"]
           } end'
+        notify_started "$last" "$state"
+        last=$state
       done
     '';
   };
