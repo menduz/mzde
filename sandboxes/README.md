@@ -1,0 +1,400 @@
+# sandboxes
+
+Named sandboxes for programs on NixOS, as the qubes of Qubes OS. Each sandbox
+has a name, a color, a home directory, a network policy and a set of
+capabilities. The `sandbox` command starts a program in a sandbox with a
+**backend**: bubblewrap, gVisor, or a backend of your own.
+
+The options use the configuration keys of
+[sandboxed-agents](https://github.com/eordano/sandboxed-agents#configuration).
+
+| Qubes OS                 | sandboxes                                                     |
+| ------------------------ | ------------------------------------------------------------- |
+| qube                     | `programs.sandboxes.environments.<name>`                      |
+| label color              | `color`; the window manager draws it                          |
+| AppVM private volume     | `persistentHome = true` (`~/.local/share/sandboxes/<name>`)   |
+| disposable VM            | `persistentHome = false`                                      |
+| TemplateVM root          | the read-only `/nix/store` and `/etc` of the host             |
+| NetVM / firewall         | slirp4netns + iptables per sandbox; `internetAccess`, `lanAccess`, `allowHosts`, `socksProxy` |
+| firewall prompts         | an OpenSnitch daemon in the network of the sandbox (`opensnitch.enable`) |
+| `qvm-ls`                 | `sandbox list`, `sandbox ps`                                  |
+| `qvm-run`                | `sandbox run NAME -- CMD`                                     |
+| `qvm-shutdown`           | `sandbox stop NAME`                                           |
+
+## Usage
+
+The module is part of [mzde](../README.md): `mzde.nixosModules.default`
+imports it, and gives the desktop around it (`nix/sandboxes.nix`). Without the
+desktop, import only `mzde.nixosModules.sandboxes`:
+
+```nix
+{
+  inputs.mzde.url = "git+https://github.com/menduz/mzde.git?ref=main";
+
+  outputs = { nixpkgs, mzde, ... }: {
+    nixosConfigurations.box = nixpkgs.lib.nixosSystem {
+      modules = [
+        mzde.nixosModules.sandboxes
+        {
+          programs.sandboxes = {
+            enable = true;
+            environments = {
+              work = {
+                color = "#008080";
+                ssh = true;
+                git = true;
+                paths = [ "~/code" ];
+              };
+              web = {
+                color = "#800080";
+                backend = "gvisor";
+                audio = true;
+                lanAccess = false;
+              };
+              vault = {
+                color = "#599764";
+                disableNetworking = true;
+              };
+            };
+          };
+        }
+      ];
+    };
+  };
+}
+```
+
+```console
+$ sandbox list
+work      #008080   bwrap   internet   gui,ssh,git        ...
+web       #800080   gvisor  inet-only  gui,audio          ...
+vault     #599764   bwrap   none       gui                ...
+$ sandbox run work -- ghostty
+$ sandbox run web -- firefox
+$ sandbox ps
+SANDBOX      PID      COMMAND
+work         41213    ghostty
+$ sandbox stop work
+$ sandbox show web          # the plan and the backend command, not started
+$ sandbox pick --host       # a menu (rofi by default); prints the name
+$ sandbox pick --gui        # only the sandboxes with gui
+$ sandbox host -- ghostty   # no sandbox, but SANDBOX_NAME=host, the host color
+                            # and a scope app-sandbox-host-*.scope below app.slice
+$ sandbox current           # the sandbox of this process, or "host"
+$ sandbox run --need-cwd work -- make
+                            # stops if the sandbox does not have the current directory
+```
+
+### Commands
+
+A program can run only in sandboxes. `commands` of a sandbox gives the
+system and the sandbox a command for each program:
+
+```nix
+programs.sandboxes.environments.work.commands = {
+  make = pkgs.gnumake;
+  claude = {
+    package = pkgs.claude-code;
+    cwdOnly = true;
+  };
+};
+```
+
+- In `work`, `claude` starts the program. The command is first in PATH.
+- On the host and in the sandboxes without the command, `claude` stops with
+  an error: start it in a terminal of a sandbox with it (`sandbox run work`).
+- Many sandboxes can have the same command. In `programs.sandboxes.defaults`,
+  a command is in each sandbox, or in each sandbox that allows it:
+
+  ```nix
+  programs.sandboxes.defaults = { config, ... }: {
+    commands = lib.mkIf (config.claude != "none") {
+      claude = { package = pkgs.claude-code; cwdOnly = true; };
+    };
+  };
+  ```
+- With `cwdOnly`, the program sees only the current directory of the
+  `paths` of the sandbox: in `~/code/app`, `~/code` has only `app`, and a
+  file of `paths` is empty. The other mounts of the sandbox stay. If a path
+  has the configuration of a program (`~` with `claude = "write"`), the
+  command does not start. The program runs in a nested bwrap, so
+  the sandbox needs user namespaces (the bwrap backend). `bwrapArgs` gives
+  more arguments to that bwrap.
+
+The command asks `sandbox current`: that is `SANDBOX_NAME`, but a program on
+the host can set `SANDBOX_NAME`. On the host PID 1 is systemd, and then
+`sandbox current` is `host`. In a sandbox, PID 1 is bwrap (bwrap) or the
+first program (gVisor).
+
+## How it works
+
+```
+sandbox run NAME -- CMD
+ └─ systemd-run --user --scope --slice=sandbox-NAME.slice     (sandbox ps / stop)
+     └─ the frontend makes the plan (plan.json)
+         ├─ network "none" or "host": the backend starts at once
+         ├─ network "private": unshare --user --net, slirp4netns, iptables
+         │   └─ <backend> run plan.json
+         │       ├─ bwrap:  bubblewrap, the kernel of the host
+         │       └─ gvisor: runsc, an OCI bundle, the kernel of gVisor
+         └─ network "shared" (opensnitch.enable): nsenter into the network
+             namespace of the user service sandbox-net@NAME
+             └─ <backend> run plan.json
+```
+
+The frontend does all the work that does not change with the backend: it
+reads the configuration, finds the sockets of the host, selects the mounts and
+the environment, and makes the network namespace. A backend only isolates.
+
+## Options
+
+Each sandbox in `programs.sandboxes.environments.<name>`:
+
+| Option                   | Default   | Function |
+| ------------------------ | --------- | -------- |
+| `description`            | `""`      | text for `sandbox list` and the menu |
+| `color`                  | `#808080` | label color, also in `SANDBOX_COLOR` |
+| `gtkTheme`               | `null`    | `GTK_THEME` of the programs |
+| `backend`                | `bwrap`   | a name of `programs.sandboxes.backends` (`runsc` is `gvisor`) |
+| `backendArgs.<backend>`  | `[]`      | extra arguments for one backend |
+| `extraBubblewrapArgs`    | `[]`      | the same as `backendArgs.bwrap` |
+| `extraRunscArgs`         | `[]`      | the same as `backendArgs.gvisor` |
+| `extraQemuArgs`          | `[]`      | the same as `backendArgs.microvm` |
+| `extraSandboxExecArgs`   | `[]`      | the same as `backendArgs.seatbelt` |
+| `hostname`               | the name  | host name in the sandbox |
+| `persistentHome`         | `true`    | the home directory keeps its files |
+| `homeDirectory`          | `<stateDir>/<name>/home` | the home directory on the host |
+| `homePatterns`           | `[]`      | paths below `$HOME` from the host, read-only (`rw:` prefix: writable) |
+| `files.<path>`           | `{}`      | read-only files below `$HOME` (`text` or `source`) |
+| `paths`                  | `[]`      | bind mounts: `/p`, `ro:/p`, `/host:/guest` |
+| `env`                    | `{}`      | extra environment variables |
+| `extraEnvs`              | `[]`      | extra environment variables as `"KEY=VALUE"` |
+| `passEnv`                | `[]`      | more variables from the caller (added to `programs.sandboxes.passEnv`) |
+| `packages`               | `[]`      | packages at the start of `PATH` |
+| `commands`               | `{}`      | programs that run only in this sandbox: a command of the system for each (refer to Commands) |
+| `ssh`                    | `false`   | `~/.ssh` and the agent socket (an access, see below) |
+| `sshWrite`               | `false`   | the same as `ssh = "write"` |
+| `gpg`                    | `false`   | `~/.gnupg` and the gpg-agent sockets |
+| `git`                    | `false`   | `~/.gitconfig`, `~/.config/git`, `~/.git-credentials` |
+| `claude`                 | `false`   | `~/.claude`, `~/.claude.json` |
+| `codex`                  | `false`   | `~/.codex` |
+| `gemini`                 | `false`   | `~/.gemini` |
+| `hermes`                 | `false`   | `~/.hermes` |
+| `opencode`               | `false`   | `~/.config/opencode` |
+| `zed`                    | `false`   | `~/.config/zed`, `~/.local/share/zed` |
+| `direnv`                 | `false`   | `~/.config/direnv`, `~/.local/share/direnv` (the allowed `.envrc` files) |
+| `xdgRemap`               | `false`   | `$XDG_CONFIG_HOME/<program>` at `~/.<program>` (claude, codex, gemini, hermes), if it is on the host |
+| `noXdgRemap`             | `false`   | `xdgRemap` is false |
+| `yolo`                   | `false`   | `claude` starts with `--dangerously-skip-permissions` |
+| `docker`                 | `false`   | the Docker socket (root on the host) |
+| `fuse`, `kvm`, `nvidia`  | `false`   | the devices |
+| `gui`                    | `true`    | the Wayland socket, `/dev/dri`, `/sys` |
+| `x11`                    | `private` | `private`: an X server for each run (xwayland-satellite); `host`: the X sockets of the host (no isolation); `none` |
+| `audio`                  | `false`   | PipeWire, PulseAudio, `/dev/snd` |
+| `dbus`                   | `private` | `private`: a session bus for each run; `host`: the session bus of the host (no isolation); `none` |
+| `libvirt`                | `false`   | the libvirt sockets |
+| `nix`                    | `false`   | the socket of the Nix daemon |
+| `allowHome`              | `false`   | the real home directory, writable |
+| `internetAccess`         | `true`    | false: only local networks and `allowHosts` |
+| `lanAccess`              | `true`    | false: only the internet |
+| `allowHosts`             | `[]`      | hosts that are open when `internetAccess` is false |
+| `disableNetworking`      | `false`   | no network |
+| `shareHostNetwork`       | `false`   | the network namespace of the host (no firewall; the sandbox can reach 127.0.0.1 and abstract sockets such as Xwayland) |
+| `allowHostLoopback`      | `false`   | 127.0.0.1 of the host at 10.0.2.2 |
+| `socksProxy`             | `null`    | all traffic through a SOCKS5 proxy (tun2socks); `HOST:PORT` or `socks5://HOST:PORT` |
+| `privacyFilter`          | `false`   | all traffic through the privacy-filter proxy: `socksProxy`, else port 1080 of the host |
+| `mountHomeCache`         | `false`   | `programs.sandboxes.homeCacheDirs` |
+| `mountCommonHomeFolders` | `false`   | `programs.sandboxes.commonHomeFolders` |
+| `mountTmp`               | `false`   | the `/tmp` of the host |
+| `sharedTmp`              | `false`   | `/tmp/sandbox-<uid>-<name>` of the host at `/tmp`: one `/tmp` for all runs of the sandbox, in place of a tmpfs for each run |
+| `mounts`                 | `[]`      | `"common-tools"`: `mountCommonHomeFolders`; `"caches"`: `mountHomeCache` |
+| `cleanTmp`               | `true`    | remove the files of the run (the plan) after the program |
+| `opensnitch.enable`      | `false`   | an OpenSnitch daemon in the network of the sandbox |
+| `opensnitch.rules`       | `{}`      | OpenSnitch rules for this sandbox only |
+| `opensnitch.allowOnHost` | `false`   | the daemon of the host allows the slirp4netns of this sandbox |
+| `opensnitch.directory`   | `<stateDir>/<name>/opensnitch` | the configuration and the rules of the daemon |
+
+The options `ssh`, `git`, `claude`, `codex`, `gemini`, `hermes`, `opencode`,
+`zed` and `direnv` are accesses to the configuration of a program on the host:
+
+| Value             | Function |
+| ----------------- | -------- |
+| `"none"`, `false` | the sandbox does not get it |
+| `"read"`, `true`  | read-only |
+| `"write"`         | writable; the command makes a directory that is not on the host |
+
+```nix
+agents = {
+  claude = "write";
+  codex = "read";
+  git = "read";
+  zed = "read";
+  ssh = true;
+};
+```
+
+A path below `.config`, `.local/share` or `.cache` comes from
+`$XDG_CONFIG_HOME`, `$XDG_DATA_HOME` or `$XDG_CACHE_HOME` of the host. A path
+that is not on the host is not mounted. The mounts of these options come after
+`homePatterns` and `files`, so they cover a path of `homePatterns` or `files`
+below them.
+
+`programs.sandboxes.host.color` is the label color of the host: `sandbox host`
+and the "host" entry of `sandbox pick --host` use it. No sandbox can have the
+name `host`.
+
+`programs.sandboxes.defaults` is a module that applies to every sandbox. It
+gets `name` and `config` of the sandbox, and it can declare options, for
+example a theme that it makes from the color.
+
+## OpenSnitch
+
+With `opensnitch.enable`, the sandbox has an OpenSnitch daemon in its network
+namespace. The daemon sees each connection before slirp4netns, so it sees the
+program in the sandbox (for example `firefox`), and not `slirp4netns`. It asks
+the OpenSnitch GUI of the host, as the daemon of the host does.
+
+```
+sandbox run web -- firefox                 sandbox run web -- curl ...
+ └─ scope (Requires=sandbox-net@web)        └─ scope (Requires=sandbox-net@web)
+     └─ nsenter ──┐                             └─ nsenter ──┐
+                  ▼                                          ▼
+sandbox-net@web.service: one network namespace for all runs of "web"
+ ├─ opensnitchd (proc monitor, nftables queue) ─── unix socket ──► GUI: node unix:/web
+ ├─ iptables of internetAccess / lanAccess
+ └─ slirp4netns ──► the network of the host (and its OpenSnitch daemon)
+```
+
+- All runs of the sandbox share one network namespace, so the sandbox has one
+  daemon and one node in the GUI. The user service `sandbox-net@<name>`
+  holds the namespace. Each run requires it, so systemd starts it before the
+  first run and stops it after the last run (`StopWhenUnneeded`). A run
+  without a scope (`SANDBOX_NO_SCOPE=1`) gets a namespace and a daemon of its
+  own.
+- The daemon sends its name to the GUI (`Server.Name`). The GUI shows it as
+  the node `unix:/<name>`: the pop-up tells the node ("curl on **web** is
+  connecting to ..."), and the rules page shows the rules of each node. The
+  GUI shows one pop-up for each node, so the pop-ups of two sandboxes can be
+  on the screen at the same time.
+- The rules of `programs.sandboxes.opensnitch.rules` apply to all daemons of
+  the sandboxes. The default is `services.opensnitch.rules`: a rule of the
+  configuration applies to the host and to each sandbox. The rules that you
+  make in the GUI are files in `opensnitch.directory/rules`, and they stay.
+- The daemon runs as the user, as root of a user namespace. eBPF and audit
+  need root on the host, so the daemon uses the `proc` process monitor.
+- The queue has no bypass: if the daemon stops, the sandbox has no new
+  connections until the daemon is back. The service starts the daemon again.
+- The configuration is the configuration of the daemon of the host, with the
+  changes for a user namespace, and `programs.sandboxes.opensnitch.settings`.
+  The command writes it again at each start, so a change from the GUI lasts
+  until the next start.
+- The daemon of the host sees `slirp4netns`. `opensnitch.allowOnHost` adds a
+  rule that allows the `slirp4netns` of the sandbox (by `SANDBOX_NAME` in its
+  environment), so that the host does not ask a second time.
+
+The daemon must be the fork of menduz: it opens its netfilter queue in a user
+namespace, and it sends `Server.Name` to the GUI. The GUI must also be the
+fork, to show the nodes by name.
+
+```console
+$ journalctl --user -u sandbox-net@web     # the log of the daemon
+$ ls ~/.local/share/sandboxes/web/opensnitch/rules
+```
+
+## Backends
+
+A backend is a command with two forms:
+
+```
+<backend> run  PLAN.json    start the program of the plan; the exit code is the exit code of the program
+<backend> show PLAN.json    print the command, and do not start it
+```
+
+Add a backend with `programs.sandboxes.backends.<name> = package;` (the
+package must have `meta.mainProgram`), then use `backend = "<name>";`.
+
+| Backend  | Isolation                       | Limits |
+| -------- | ------------------------------- | ------ |
+| `bwrap`  | Linux namespaces                | the program uses the kernel of the host |
+| `gvisor` | a kernel in user space (runsc)  | no Wayland or X11 client can draw: gVisor cannot give its memory files (the window buffers) to the compositor, so use `gui = false` and a terminal on the host; no `/dev/dri`, `/dev/snd`, `/dev/kvm`; NVIDIA through `--nvproxy` (`SANDBOX_RUNSC_NVPROXY=1`); the program is uid 0 in gVisor (rootless runsc maps it to the user on the host) |
+
+With a terminal (`tty` in the plan), the gVisor backend runs the command in
+`script` (util-linux). `script` makes a terminal in gVisor, so Ctrl-C and a
+change of the window size go to the program in the sandbox, and not to runsc.
+The backend sends SIGWINCH to the processes of the sandbox when the terminal
+of the host changes its size.
+
+### The plan
+
+```json
+{
+  "version": 1,
+  "name": "work",
+  "hostname": "work",
+  "uid": 1000,
+  "gid": 100,
+  "home": "/home/alice",
+  "cwd": "/home/alice/code",
+  "tty": false,
+  "network": "inherit",
+  "mounts": [
+    { "type": "bind",  "source": "/nix/store", "target": "/nix/store", "mode": "ro" },
+    { "type": "bind",  "source": "/home/alice/.local/share/sandboxes/work/home", "target": "/home/alice", "mode": "rw" },
+    { "type": "dev",   "source": "/dev/dri", "target": "/dev/dri", "mode": "rw" },
+    { "type": "tmpfs", "source": "", "target": "/run/user/1000", "mode": "0700" }
+  ],
+  "env": { "SANDBOX_NAME": "work", "SANDBOX_COLOR": "#008080", "PATH": "..." },
+  "command": ["ghostty"],
+  "extraArgs": []
+}
+```
+
+- `network`: `none` (the backend makes an empty network namespace) or
+  `inherit` (the backend uses the network namespace that it starts in).
+- `mounts`, in order; a later mount can cover an earlier one.
+  - `bind`: `mode` is `ro` or `rw`.
+  - `dev`: a device node or directory of devices.
+  - `tmpfs`: `mode` is the octal permission.
+- `env`: the full environment. The backend adds nothing.
+- The backend gives `/proc`, `/dev` and `/dev/shm` itself.
+- `command` starts with `sandbox-init` when the sandbox has a private X
+  server or a private session bus. `sandbox-init` starts them, and then it
+  replaces itself with the command. A backend does nothing special for it.
+
+## Window managers
+
+The module declares a systemd user slice for each sandbox,
+`sandbox-<name>.slice` below `sandbox.slice`. `sliceConfig` sets its limits
+(`MemoryMax=`, `CPUQuota=`). Every run is in a scope in that slice, so a
+window manager finds the sandbox of a window from the cgroup of the client PID:
+
+1. the cgroup `.../sandbox.slice/sandbox-<name>.slice/...`: the sandbox
+   `<name>`, with the color of `/etc/sandboxes/config.json`;
+2. else the host, with `.host.color` of `/etc/sandboxes/config.json`.
+
+The window manager does not read the environment: a program can change its
+own environment, but not its cgroup. With gVisor, the Wayland client is the
+Sentry of runsc, so only the cgroup is correct. Thus a run without a scope
+(`SANDBOX_NO_SCOPE=1`) is on the host for the window manager. `SANDBOX_NAME`
+and `SANDBOX_COLOR` are only for the programs in the sandbox, for example a
+shell prompt. The kwm fork of menduz and `netgraph.sh` do this.
+
+## Tests
+
+`nix build .#checks.x86_64-linux.sandboxes` (in mzde) runs a NixOS VM test of
+the network modes, the home directories, the commands, the label and the
+scopes, with both backends.
+
+## Limits of this prototype
+
+- The Wayland socket of the host is shared. A program in a sandbox can use all
+  Wayland protocols of the compositor (for example, screen capture). The
+  next step is `wp_security_context_v1`.
+- No D-Bus filter to the host: `dbus` gives a private bus or all of the
+  session bus of the host. `xdg-dbus-proxy` and the portals are the next step.
+- Each run is a separate container: two runs of one sandbox share the home
+  directory, but not the private X server, the session bus or `/tmp`
+  (`sharedTmp` gives one `/tmp` to all runs).
+- Resource limits apply to the whole sandbox (`sliceConfig`), not to one run.
+- With `opensnitch.enable`, the runs of a sandbox share the network
+  namespace: they can connect to each other on 127.0.0.1.

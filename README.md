@@ -21,6 +21,11 @@ screen locker.
   scheme without a rebuild.
 - Screenshots with `scrn` (Super+Alt 1) and `slurpscrn` (Super+Alt 4), the
   wlr and GTK portals (screen sharing with a rofi chooser), polkit.
+- Named sandboxes, as the qubes of Qubes OS (`sandboxes/`): bubblewrap or
+  gVisor, each with its home directory, network, color and win-classic
+  scheme. kwm shows the sandbox of each window. Super+Space and Super+Return
+  ask for the sandbox, and then start a program or Ghostty in it. A command
+  of a sandbox runs its program only in that sandbox.
 
 ## Use
 
@@ -70,6 +75,11 @@ All options are in `nix/options.nix`.
 - `mzde.rofi.plugins`; `mzde.rofi.package` is the `mz-rofi` command.
 - `mzde.toggleTheme` is the `toggle-theme` command.
 - `programs.win-classic-theme.*`: the theme. Refer to win-classic-theme.
+- `programs.sandboxes.*`: the sandboxes and their commands. Refer to
+  `sandboxes/README.md`. Each sandbox also has `winTheme.preset` (the
+  win-classic scheme). `mzde.sandboxes.*` (`nix/sandboxes.nix`): the Home
+  Manager user whose dotfiles the sandboxes get, the Ghostty of the
+  sandboxes, and the menus.
 
 ## Development
 
@@ -88,6 +98,8 @@ reproducible.
 
 `nix build .#checks.x86_64-linux.lock-prompt` tests the patches of river and
 waylock: the password prompt stays in the center after a change of the output.
+
+`nix build .#checks.x86_64-linux.sandboxes` tests the sandboxes in a NixOS VM.
 
 `nix build .#checks.x86_64-linux.kwim-apply` tests the patch of kwim: kwim
 waits until river applies its settings, also when river is slow (as after a

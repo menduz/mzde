@@ -334,6 +334,21 @@ in
         example = lib.literalExpression "[ pkgs.rofi-calc ]";
         description = "The plugins of rofi.";
       };
+      unwrapped = lib.mkOption {
+        type = lib.types.package;
+        readOnly = true;
+        internal = true;
+        description = "rofi with the plugins, without a theme. `mz-rofi` starts it.";
+      };
+      modalTheme = lib.mkOption {
+        type = lib.types.functionTo (lib.types.functionTo lib.types.package);
+        readOnly = true;
+        internal = true;
+        description = ''
+          `modalTheme NAME RASI`: the rofi theme file RASI of win-classic as
+          a modal dialog, as `mz-rofi` shows it.
+        '';
+      };
     };
   };
 }

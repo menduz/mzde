@@ -2,3 +2,4 @@ result
 result-*
 zig-out
 .zig-cache
+sandboxes/proof/

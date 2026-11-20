@@ -28,14 +28,14 @@ let
   # The rofi theme of a theme below share/themes.
   rofiTheme = name: "${winTheme.theme.package}/share/themes/${name}/rofi/win-classic.rasi";
 
-  # The rofi theme of a theme as a modal dialog. A fullscreen window darkens
-  # the output, and the menu frame is in a box at the center. The frame boxes
-  # are the same as the frame of window, mainbox and bevel in
+  # A rofi theme file as a modal dialog. A fullscreen window darkens the
+  # output, and the menu frame is in a box at the center. The frame boxes are
+  # the same as the frame of window, mainbox and bevel in
   # rofi/win-classic.rasi of win-classic-theme.
-  modalTheme =
-    name:
+  modalThemeOf =
+    name: rasi:
     pkgs.writeText "${name}-modal.rasi" ''
-      @import "${rofiTheme name}"
+      @import "${rasi}"
 
       window {
           fullscreen:       true;
@@ -70,6 +70,9 @@ let
       }
     '';
 
+  # The modal dialog of a theme below share/themes.
+  modalTheme = name: modalThemeOf name (rofiTheme name);
+
   # toggle-theme changes the GTK theme at run time. This command reads the
   # GTK theme from GSettings each time, and gives the rofi theme of that
   # scheme. Without a match, it uses the scheme of the build.
@@ -99,7 +102,13 @@ let
 in
 {
   config = lib.mkMerge [
-    { mzde.rofi.package = mz-rofi; }
+    {
+      mzde.rofi = {
+        package = mz-rofi;
+        unwrapped = rofi;
+        modalTheme = modalThemeOf;
+      };
+    }
     (lib.mkIf cfg.enable {
       home-manager.sharedModules = [
         {

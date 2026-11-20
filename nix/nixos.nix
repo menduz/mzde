@@ -38,6 +38,8 @@ in
     ./theme.nix
     ./wayland.nix
     ./widgets.nix
+    ./sandboxes.nix
+    ../sandboxes/module.nix
     ../kwm-portal/nix/modules/nixos.nix
     "${winClassicTheme}/nixos-module.nix"
   ];

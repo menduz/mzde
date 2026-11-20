@@ -65,6 +65,9 @@
       # set mzde.enable = true. Refer to README.md.
       nixosModules.default = import ./nix/nixos.nix inputs;
       nixosModules.mzde = self.nixosModules.default;
+      # The named sandboxes and the `sandbox` command, without the desktop.
+      # The desktop imports it. Refer to sandboxes/README.md.
+      nixosModules.sandboxes = ./sandboxes/module.nix;
 
       # The Nix library of mz-term-colors: `lib.termColors { inherit pkgs; }`.
       lib.termColors = import "${inputs.mz-term-colors}/lib";
@@ -82,6 +85,7 @@
             waylock
             ;
           kwm-portal = pkgs.callPackage ./kwm-portal/nix/package.nix { };
+          sandbox = pkgs.callPackage ./sandboxes/package.nix { };
         }
         // nixpkgs.lib.optionalAttrs (pkgs.stdenv.hostPlatform.system == "x86_64-linux") {
           inherit (shots) screenshots screenshot;
@@ -104,6 +108,11 @@
           kwim-apply = pkgs.callPackage ./tests/kwim-apply.nix {
             inherit (p) river kwm kwim;
           };
+          # The network modes, the home directory, the commands and the
+          # labels of the sandboxes, with bubblewrap and gVisor.
+          sandboxes = pkgs.testers.runNixOSTest (
+            import ./sandboxes/test.nix { module = self.nixosModules.sandboxes; }
+          );
         };
 
       # `nix run .#screenshots` writes screenshots/dark.png and
