@@ -778,6 +778,44 @@ let
         ${jsonFormat.generate "settings.json" settings} >"$out"
     '';
 
+  # OpenSSH checks the owner of each file that an Include of ssh_config
+  # names: root or the user. In a sandbox the root of the host is not in the
+  # user namespace, thus the files of /nix/store have the owner nobody, and
+  # ssh stops ("Bad owner or permissions"). /etc/ssh/ssh_config of NixOS
+  # includes a file of systemd (programs.ssh.systemd-ssh-proxy). The sandboxes
+  # get a copy of /etc/ssh/ssh_config with the content of each included file
+  # of /nix/store in place of its Include. An included file can start Host
+  # blocks, thus the line of the Host or Match block of the Include comes
+  # again after the content. ssh does not check the owner of ssh_config
+  # itself.
+  sshConfig =
+    let
+      etc = config.environment.etc."ssh/ssh_config" or null;
+    in
+    if etc == null || !etc.enable then
+      null
+    else
+      pkgs.runCommand "sandbox-ssh_config" { } ''
+        block="Host *"
+        while IFS= read -r line || [ -n "$line" ]; do
+          trimmed=''${line#"''${line%%[![:space:]]*}"}
+          case ''${trimmed,,} in
+            host[[:space:]]* | match[[:space:]]*) block=$trimmed ;;
+          esac
+          case $line in
+            "Include /nix/store/"*)
+              printf '# %s\n' "$line"
+              for f in ''${line#Include }; do
+                cat "$f"
+                printf '\n'
+              done
+              printf '%s\n' "$block"
+              ;;
+            *) printf '%s\n' "$line" ;;
+          esac
+        done <${etc.source} >$out
+      '';
+
   # The JSON file that the `sandbox` command reads.
   toJSON = name: e: {
     inherit (e)
@@ -851,6 +889,7 @@ let
       host = { inherit (cfg.host) color; };
       backends = lib.mapAttrs (_: lib.getExe) cfg.backends;
       init = lib.getExe cfg.initPackage;
+      sshConfig = if sshConfig == null then null else "${sshConfig}";
       inherit (cfg) homeCacheDirs commonHomeFolders;
       opensnitch =
         if anyOpensnitch then

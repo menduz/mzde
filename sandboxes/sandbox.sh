@@ -136,6 +136,7 @@ load_env() {
       E_FILES=(\($files))
       E_BIN=(\($e.bin))
       E_INIT=\(.init)
+      E_SSH_CLIENT_CONFIG=\(.sshConfig // "")
       E_HOME_CACHE_DIRS=(\(.homeCacheDirs))
       E_COMMON_HOME_DIRS=(\(.commonHomeFolders))
     "' "$CONFIG")
@@ -215,6 +216,13 @@ build_plan() {
   # The base system, read-only.
   bind ro /nix/store
   bind ro /etc
+  # ssh_config without the Include of files of /nix/store: ssh refuses them,
+  # because their owner is nobody in the sandbox. Refer to module.nix. On
+  # NixOS, /etc/ssh/ssh_config is a symbolic link, and a backend cannot mount
+  # on a link: the mount goes on the file at the end of the link.
+  if [ -n "$E_SSH_CLIENT_CONFIG" ] && [ -e /etc/ssh/ssh_config ]; then
+    bind ro "$E_SSH_CLIENT_CONFIG" "$(readlink -f /etc/ssh/ssh_config)"
+  fi
   bind ro /bin
   bind ro /usr
   bind ro /run/current-system

@@ -43,6 +43,7 @@ in
     ];
     environment.systemPackages = [
       pkgs.curl
+      pkgs.openssh
       pkgs.socat
     ];
     users.users.alice = {
@@ -252,6 +253,22 @@ in
         # cwdOnly does not start when a path has the configuration of a program.
         out = sb("homeagent", "cd ~/work/a && whereami-cwd 2>&1", ok=False)
         assert "has the configuration /home/alice/.claude" in out, out
+
+    with subtest("ssh"):
+        # /etc/ssh/ssh_config of NixOS includes a file of /nix/store
+        # (systemd-ssh-proxy). ssh refuses an included file that is not owned
+        # by root or by the user, and in a sandbox the files of the host
+        # root have the owner nobody.
+        client.succeed("grep -q '^Include /nix/store/' /etc/ssh/ssh_config")
+        # sb() quotes the command: no quotes or spaces in the pattern.
+        known = "grep -qx globalknownhostsfile./etc/ssh/ssh_known_hosts"
+        client.succeed(f"su - alice -c 'ssh -G example.com | {known}'")
+        for env in ["net", "gnet"]:
+            # The options of the included file, and the global options after
+            # the Include, stay as on the host.
+            assert "proxycommand" in sb(env, "ssh -G unix/run/x"), env
+            assert "proxycommand" not in sb(env, "ssh -G example.com"), env
+            sb(env, f"ssh -G example.com | {known}")
 
     with subtest("terminal"):
         # The program gets a terminal, and the exit code of the program.
