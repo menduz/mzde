@@ -107,6 +107,22 @@ For gVisor, set `backend = "gvisor";` and `gui = false;`.
 The terminal menu then opens Ghostty on the host with a shell in the sandbox.
 GUI sandboxes share the host Wayland socket, which permits access to compositor functions such as screen capture.
 
+### OpenSnitch
+
+mzde includes a fork of OpenSnitch ([menduz/opensnitch](https://github.com/menduz/opensnitch), branch `fork`).
+To use it in place of the nixpkgs version, add this overlay:
+
+```nix
+nixpkgs.overlays = [ mzde.overlays.opensnitch ];
+```
+
+The fork changes these sandbox behaviors:
+
+- The daemon reads the sandbox of each process from its cgroup (`sandbox-<name>.slice`). A process cannot change its cgroup, but it can change `SANDBOX_NAME`.
+- The prompt shows the sandbox name in the sandbox color. A rule that you make from the prompt applies only to that sandbox.
+- Rules can match the `process.sandbox` operand.
+- With `opensnitch.enable = true;` in its settings, a sandbox runs its own daemon in its network namespace. The UI shows this daemon as the node `unix:/<name>`. The nixpkgs daemon cannot open its netfilter queue in a user namespace.
+
 Refer to [the sandbox instructions](sandboxes/README.md) for access controls, commands, network settings, and backend limits.
 For use without the desktop, import `mzde.nixosModules.sandboxes`.
 
