@@ -128,23 +128,50 @@ first program (gVisor).
 
 ## How it works
 
+Each sandbox is a container, as in Docker. The first run starts it, each run
+starts its program in it (as `docker exec`), and it stops after the last run.
+
 ```
 sandbox run NAME -- CMD
  └─ systemd-run --user --scope --slice=sandbox-NAME.slice     (sandbox ps / stop)
-     └─ the frontend makes the plan (plan.json)
-         ├─ network "none" or "host": the backend starts at once
-         ├─ network "private": unshare --user --net, slirp4netns, iptables
-         │   └─ <backend> run plan.json
-         │       ├─ bwrap:  bubblewrap, the kernel of the host
-         │       └─ gvisor: runsc, an OCI bundle, the kernel of gVisor
-         └─ network "shared" (opensnitch.enable): nsenter into the network
-             namespace of the user service sandbox-net@NAME
-             └─ <backend> run plan.json
+     │  Requires=sandbox@NAME.service: systemd starts the container first
+     └─ the frontend makes the plan of the run (plan.json)
+         └─ <backend> exec plan.json: CMD in the container, with the
+             environment, the directory and the terminal of this run
+
+sandbox@NAME.service: the container of NAME, for all runs   (in sandbox-NAME.slice)
+ ├─ network "none" or "host": the backend starts at once
+ ├─ network "private": unshare --user --net, slirp4netns, iptables,
+ │   the OpenSnitch daemon (opensnitch.enable)
+ └─ <backend> start plan.json
+     ├─ bwrap:  bubblewrap, the kernel of the host
+     ├─ gvisor: runsc, an OCI bundle, the kernel of gVisor
+     └─ sandbox-init: the X server (xwayland-satellite) and the session bus
+         of the sandbox; it stays until the container stops
 ```
 
 The frontend does all the work that does not change with the backend: it
 reads the configuration, finds the sockets of the host, selects the mounts and
 the environment, and makes the network namespace. A backend only isolates.
+
+- All runs of a sandbox share the processes, `/tmp`, `$XDG_RUNTIME_DIR`, the
+  home directory of a disposable sandbox, the X server, the session bus, the
+  network and the OpenSnitch daemon. A sandbox has one of each.
+- The container gets the mounts and the environment of the run that starts
+  it (for example the Wayland socket and `SSH_AUTH_SOCK`). A run with
+  different mounts (after a change of the configuration) starts its program
+  with the mounts of the container, and `sandbox` tells it: `sandbox stop
+  NAME` stops the container and its programs, and the next run starts it
+  again.
+- A program of a run can stay after the command of the run (for example a
+  server that the command starts). The scope of the run, and thus the
+  container, stay until its last process stops. A run of bwrap stops its
+  command if `sandbox` stops.
+- A run without a scope (`SANDBOX_NO_SCOPE=1`, or no systemd user manager)
+  gets a container of its own: `<backend> run plan.json`, with its own
+  network, X server and session bus.
+- The service has the log of the container and of the OpenSnitch daemon:
+  `journalctl --user -u sandbox@NAME`.
 
 ## Options
 
@@ -189,9 +216,9 @@ Each sandbox in `programs.sandboxes.environments.<name>`:
 | `docker`                 | `false`   | the Docker socket (root on the host) |
 | `fuse`, `kvm`, `nvidia`  | `false`   | the devices |
 | `gui`                    | `true`    | the Wayland socket, `/dev/dri`, `/sys` |
-| `x11`                    | `private` | `private`: an X server for each run (xwayland-satellite); `host`: the X sockets of the host (no isolation); `none` |
+| `x11`                    | `private` | `private`: an X server for the sandbox (xwayland-satellite); `host`: the X sockets of the host (no isolation); `none` |
 | `audio`                  | `false`   | PipeWire, PulseAudio, `/dev/snd` |
-| `dbus`                   | `private` | `private`: a session bus for each run; `host`: the session bus of the host (no isolation); `none` |
+| `dbus`                   | `private` | `private`: a session bus for the sandbox; `host`: the session bus of the host (no isolation); `none` |
 | `libvirt`                | `false`   | the libvirt sockets |
 | `nix`                    | `false`   | the socket of the Nix daemon |
 | `allowHome`              | `false`   | the real home directory, writable |
@@ -206,7 +233,7 @@ Each sandbox in `programs.sandboxes.environments.<name>`:
 | `mountHomeCache`         | `false`   | `programs.sandboxes.homeCacheDirs` |
 | `mountCommonHomeFolders` | `false`   | `programs.sandboxes.commonHomeFolders` |
 | `mountTmp`               | `false`   | the `/tmp` of the host |
-| `sharedTmp`              | `false`   | `/tmp/sandbox-<uid>-<name>` of the host at `/tmp`: one `/tmp` for all runs of the sandbox, in place of a tmpfs for each run |
+| `sharedTmp`              | `false`   | `/tmp/sandbox-<uid>-<name>` of the host at `/tmp`, in place of a tmpfs: the files stay after the container, and the runs without a scope get them too |
 | `mounts`                 | `[]`      | `"common-tools"`: `mountCommonHomeFolders`; `"caches"`: `mountHomeCache` |
 | `cleanTmp`               | `true`    | remove the files of the run (the plan) after the program |
 | `opensnitch.enable`      | `false`   | an OpenSnitch daemon in the network of the sandbox |
@@ -256,21 +283,22 @@ the OpenSnitch GUI of the host, as the daemon of the host does.
 
 ```
 sandbox run web -- firefox                 sandbox run web -- curl ...
- └─ scope (Requires=sandbox-net@web)        └─ scope (Requires=sandbox-net@web)
+ └─ scope (Requires=sandbox@web)            └─ scope (Requires=sandbox@web)
      └─ nsenter ──┐                             └─ nsenter ──┐
                   ▼                                          ▼
-sandbox-net@web.service: one network namespace for all runs of "web"
+sandbox@web.service: the container of "web", one network namespace for all runs
  ├─ opensnitchd (proc monitor, nftables queue) ─── unix socket ──► GUI: node unix:/web
  ├─ iptables of internetAccess / lanAccess
- └─ slirp4netns ──► the network of the host (and its OpenSnitch daemon)
+ ├─ slirp4netns ──► the network of the host (and its OpenSnitch daemon)
+ └─ <backend> start: the container
 ```
 
-- All runs of the sandbox share one network namespace, so the sandbox has one
-  daemon and one node in the GUI. The user service `sandbox-net@<name>`
-  holds the namespace. Each run requires it, so systemd starts it before the
-  first run and stops it after the last run (`StopWhenUnneeded`). A run
-  without a scope (`SANDBOX_NO_SCOPE=1`) gets a namespace and a daemon of its
-  own.
+- All runs of the sandbox share the network namespace of the container, so
+  the sandbox has one daemon and one node in the GUI. The user service
+  `sandbox@<name>` holds the namespace. Each run requires it, so systemd
+  starts it before the first run and stops it after the last run
+  (`StopWhenUnneeded`). A run without a scope (`SANDBOX_NO_SCOPE=1`) gets a
+  namespace and a daemon of its own.
 - The daemon sends its name to the GUI (`Server.Name`). The GUI shows it as
   the node `unix:/<name>`: the pop-up tells the node ("curl on **web** is
   connecting to ..."), and the rules page shows the rules of each node. The
@@ -297,18 +325,26 @@ namespace, and it sends `Server.Name` to the GUI. The GUI must also be the
 fork, to show the nodes by name.
 
 ```console
-$ journalctl --user -u sandbox-net@web     # the log of the daemon
+$ journalctl --user -u sandbox@web         # the log of the daemon
 $ ls ~/.local/share/sandboxes/web/opensnitch/rules
 ```
 
 ## Backends
 
-A backend is a command with two forms:
+A backend is a command with four forms:
 
 ```
-<backend> run  PLAN.json    start the program of the plan; the exit code is the exit code of the program
-<backend> show PLAN.json    print the command, and do not start it
+<backend> run   PLAN.json   start the program of the plan in a container of its own; the exit code is the exit code of the program
+<backend> start PLAN.json   start the container of a sandbox, with the command of the plan as its first program;
+                            make the file "ready" in the directory .state when `exec` can start programs;
+                            stop when the container stops
+<backend> exec  PLAN.json   start the command of the plan in the container of .state, with .env, .cwd and .tty;
+                            the exit code is the exit code of the program
+<backend> show  PLAN.json   print the command, and do not start it
 ```
+
+`exec` uses only `.state`, `.command`, `.env`, `.cwd`, `.tty` and
+`.network` of its plan: the mounts are the mounts of the container.
 
 Add a backend with `programs.sandboxes.backends.<name> = package;` (the
 package must have `meta.mainProgram`), then use `backend = "<name>";`.
@@ -317,6 +353,10 @@ package must have `meta.mainProgram`), then use `backend = "<name>";`.
 | -------- | ------------------------------- | ------ |
 | `bwrap`  | Linux namespaces                | the program uses the kernel of the host |
 | `gvisor` | a kernel in user space (runsc)  | no Wayland or X11 client can draw: gVisor cannot give its memory files (the window buffers) to the compositor, so use `gui = false` and a terminal on the host; no `/dev/dri`, `/dev/snd`, `/dev/kvm`; NVIDIA through `--nvproxy` (`SANDBOX_RUNSC_NVPROXY=1`); the program is uid 0 in gVisor (rootless runsc maps it to the user on the host) |
+
+`exec` of bwrap enters the namespaces and the root of the container with
+`nsenter`, without capabilities and with `no_new_privs`, as a program that
+bwrap starts. `exec` of gVisor is `runsc exec`.
 
 With a terminal (`tty` in the plan), the gVisor backend runs the command in
 `script` (util-linux). `script` makes a terminal in gVisor, so Ctrl-C and a
@@ -337,6 +377,7 @@ of the host changes its size.
   "cwd": "/home/alice/code",
   "tty": false,
   "network": "inherit",
+  "state": "/run/user/1000/sandboxes/work/c-0123abcd/backend",
   "mounts": [
     { "type": "bind",  "source": "/nix/store", "target": "/nix/store", "mode": "ro" },
     { "type": "bind",  "source": "/home/alice/.local/share/sandboxes/work/home", "target": "/home/alice", "mode": "rw" },
@@ -351,6 +392,8 @@ of the host changes its size.
 
 - `network`: `none` (the backend makes an empty network namespace) or
   `inherit` (the backend uses the network namespace that it starts in).
+- `state`: for `start` and `exec`, the directory of the container, for the
+  files of the backend; empty for `run`.
 - `mounts`, in order; a later mount can cover an earlier one.
   - `bind`: `mode` is `ro` or `rw`.
   - `dev`: a device node or directory of devices.
@@ -359,14 +402,19 @@ of the host changes its size.
 - The backend gives `/proc`, `/dev` and `/dev/shm` itself.
 - `command` starts with `sandbox-init` when the sandbox has a private X
   server or a private session bus. `sandbox-init` starts them, and then it
-  replaces itself with the command. A backend does nothing special for it.
+  replaces itself with the command. In the plan of `start`, `sandbox-init`
+  starts them and stays; in the plan of `exec`, it gets their variables
+  (`DISPLAY`, `DBUS_SESSION_BUS_ADDRESS`) and then replaces itself with the
+  command. A backend does nothing special for it.
 
 ## Window managers
 
 The module declares a systemd user slice for each sandbox,
 `sandbox-<name>.slice` below `sandbox.slice`. `sliceConfig` sets its limits
-(`MemoryMax=`, `CPUQuota=`). Every run is in a scope in that slice, so a
-window manager finds the sandbox of a window from the cgroup of the client PID:
+(`MemoryMax=`, `CPUQuota=`). Every run is in a scope in that slice, and the
+container (with the X server of the sandbox) is the service `sandbox@<name>`
+in that slice, so a window manager finds the sandbox of a window from the
+cgroup of the client PID:
 
 1. the cgroup `.../sandbox.slice/sandbox-<name>.slice/...`: the sandbox
    `<name>`, with the color of `/etc/sandboxes/config.json`;
@@ -392,9 +440,12 @@ scopes, with both backends.
   next step is `wp_security_context_v1`.
 - No D-Bus filter to the host: `dbus` gives a private bus or all of the
   session bus of the host. `xdg-dbus-proxy` and the portals are the next step.
-- Each run is a separate container: two runs of one sandbox share the home
-  directory, but not the private X server, the session bus or `/tmp`
-  (`sharedTmp` gives one `/tmp` to all runs).
+- The mounts of a container do not change while it runs. A new
+  configuration, or a run with a different Wayland socket, needs a new
+  container (`sandbox stop NAME`).
+- A program that a run of gVisor starts in the background is in gVisor,
+  not in the scope of the run: it does not keep the container, and it stops
+  when the container stops after the last run.
 - Resource limits apply to the whole sandbox (`sliceConfig`), not to one run.
-- With `opensnitch.enable`, the runs of a sandbox share the network
-  namespace: they can connect to each other on 127.0.0.1.
+- The runs of a sandbox share the network namespace: they can connect to
+  each other on 127.0.0.1.

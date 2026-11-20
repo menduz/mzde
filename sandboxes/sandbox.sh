@@ -11,6 +11,10 @@
 # This command also gives the parts that all backends share:
 #
 #   - a systemd scope below sandbox-NAME.slice (sandbox ps, sandbox stop),
+#   - the container of the sandbox: the user service sandbox@NAME starts the
+#     backend once, and each run in a scope starts its program in that
+#     container (as `docker exec`). All runs share the private X server,
+#     the session bus, /tmp, the network and the OpenSnitch daemon.
 #   - the network namespace with slirp4netns and the firewall,
 #   - the OpenSnitch daemon in the network namespace (opensnitch.enable).
 
@@ -157,6 +161,7 @@ load_env() {
 M=()         # the mounts: 4 values for each mount (type, source, target, mode)
 SAME_PATHS=() # the paths that are at the same place in the sandbox and on the host
 declare -A ENVS=()
+P_MODE=run P_STATE="" P_RESOLV=""
 
 mnt() { M+=("$1" "$2" "$3" "$4"); }
 
@@ -176,9 +181,17 @@ tmpfs() { mnt tmpfs "" "$1" "${2:-0755}"; }
 
 setenv() { ENVS[$1]=$2; }
 
-# Make the plan of the sandbox NAME for the command "$@". NET is the network
-# of the frontend: none, host, private (a network namespace for this run) or
-# shared (the network namespace of the service sandbox-net@NAME).
+# Make the plan of the sandbox NAME. P_MODE is the use of the plan:
+#
+#   run        a container for this run only (a run without a scope)
+#   container  the container of the sandbox (the service sandbox@NAME)
+#   join       a run in the container of the sandbox: the backend uses only
+#              the command, the environment, the directory and the terminal
+#
+# NET is the network of the frontend: none, host or private (a network
+# namespace with slirp4netns). P_RESOLV is the resolv.conf of a private
+# network (default $TMP/resolv.conf), P_STATE the state directory of the
+# container.
 build_plan() {
   local uid run
   uid=$(id -u)
@@ -187,17 +200,12 @@ build_plan() {
   # The program has a terminal if this command has one. make_plan_json cannot
   # test it: its standard output is the plan file.
   TTY=false
-  if [ -t 0 ] && [ -t 1 ]; then TTY=true; fi
+  if [ "$P_MODE" != container ] && [ -t 0 ] && [ -t 1 ]; then TTY=true; fi
 
   if [ "$E_DISABLE_NET" = true ]; then
     NET=none
   elif [ "$E_HOST_NET" = true ]; then
     NET=host
-  elif [ "$E_OPENSNITCH" = true ] && [ -n "${SANDBOX__SCOPED:-}" ]; then
-    # One OpenSnitch daemon for the sandbox: all runs share one network
-    # namespace. A run without a scope has no service, and it gets a network
-    # namespace and a daemon of its own.
-    NET=shared
   else
     NET=private
   fi
@@ -210,8 +218,20 @@ build_plan() {
   done
   unset 'ENVS[DISPLAY]' 'ENVS[XAUTHORITY]' 'ENVS[DBUS_SESSION_BUS_ADDRESS]' 'ENVS[WAYLAND_DISPLAY]'
 
-  # sandbox-init starts the private services before the command.
+  # sandbox-init starts the private services before the command. In the
+  # container, it starts them and stays; in a run in the container, it gets
+  # their variables (DISPLAY, DBUS_SESSION_BUS_ADDRESS) before the command.
   INIT=()
+  case $P_MODE in
+    container)
+      setenv SANDBOX_INIT_HOLD 1
+      INIT=("$E_INIT")
+      ;;
+    join)
+      setenv SANDBOX_INIT_JOIN 1
+      INIT=("$E_INIT")
+      ;;
+  esac
 
   # The base system, read-only.
   bind ro /nix/store
@@ -234,7 +254,7 @@ build_plan() {
   resolv=$(readlink -f /etc/resolv.conf || echo /etc/resolv.conf)
   case $NET in
     host) [ "$resolv" = /etc/resolv.conf ] || bind ro "$resolv" ;;
-    private | shared) mnt bind "$TMP/resolv.conf" "$resolv" ro ;;
+    private) mnt bind "${P_RESOLV:-$TMP/resolv.conf}" "$resolv" ro ;;
   esac
 
   if [ "$E_MOUNT_TMP" = true ]; then
@@ -292,18 +312,20 @@ build_plan() {
     setenv XDG_SESSION_TYPE wayland
   fi
 
-  # X11. "private": an X server for this run (xwayland-satellite), so an X11
-  # client sees no X11 client of the host or of other sandboxes. "host": the
-  # X server of the host, without isolation.
+  # X11. "private": an X server for the container (xwayland-satellite), so
+  # an X11 client sees no X11 client of the host or of other sandboxes.
+  # "host": the X server of the host, without isolation.
   if [ "$E_X11" = private ] && [ "$E_GUI" = true ]; then
-    setenv SANDBOX_INIT_X11 1
-    # The abstract X11 sockets are in the network namespace. In the namespace
-    # of the host, or in a namespace that other runs share, use a display
-    # number that the others probably do not use.
-    if [ "$NET" = host ] || [ "$NET" = shared ]; then
-      setenv SANDBOX_INIT_X11_DISPLAY $((100 + RANDOM % 800))
+    if [ "$P_MODE" != join ]; then
+      setenv SANDBOX_INIT_X11 1
+      # The abstract X11 sockets are in the network namespace. In the
+      # namespace of the host, use a display number that the host and the
+      # other sandboxes probably do not use.
+      if [ "$NET" = host ]; then
+        setenv SANDBOX_INIT_X11_DISPLAY $((100 + RANDOM % 800))
+      fi
+      INIT=("$E_INIT")
     fi
-    INIT=("$E_INIT")
   elif [ "$E_X11" = host ]; then
     bind ro /tmp/.X11-unix
     [ -n "${DISPLAY:-}" ] && setenv DISPLAY "$DISPLAY"
@@ -319,13 +341,13 @@ build_plan() {
     bind dev /dev/snd
   fi
 
-  # D-Bus. "private": a session bus for this run. "host": the session bus of
-  # the host, without isolation.
+  # D-Bus. "private": a session bus for the container. "host": the session
+  # bus of the host, without isolation.
   if [ "$E_DBUS" = host ]; then
     bind rw "$run/bus"
     setenv DBUS_SESSION_BUS_ADDRESS "unix:path=$run/bus"
   else
-    if [ "$E_DBUS" = private ]; then
+    if [ "$E_DBUS" = private ] && [ "$P_MODE" != join ]; then
       setenv SANDBOX_INIT_DBUS 1
       INIT=("$E_INIT")
     fi
@@ -459,6 +481,7 @@ make_plan_json() {
     --arg cwd "$CWD" \
     --argjson tty "$TTY" \
     --arg network "$([ "$NET" = none ] && echo none || echo inherit)" \
+    --arg state "$P_STATE" \
     --argjson extra "$(jq --arg n "$NAME" --arg b "$E_BACKEND" '.environments[$n].backendArgs[$b] // []' "$CONFIG")" \
     --argjson nm "${#M[@]}" \
     --argjson ne "${#envs[@]}" \
@@ -474,6 +497,7 @@ make_plan_json() {
           cwd: $cwd,
           tty: $tty,
           network: $network,
+          state: $state,
           mounts: [$a[:$nm] | range(0; length; 4) as $i | .[$i:$i + 4]
             | {type: .[0], source: .[1], target: .[2], mode: .[3]}],
           env: ($a[$nm:$nm + $ne] | [range(0; length; 2) as $i | {key: .[$i], value: .[$i + 1]}] | from_entries),
@@ -631,11 +655,21 @@ netns_inner() {
   exit "$rc"
 }
 
-# The process in the shared network namespace of a sandbox (the service
-# sandbox-net@NAME). It sets up the namespace, starts the OpenSnitch daemon,
-# and then waits. If the daemon stops, it starts the daemon again; if that
-# fails, it stops, and the service fails.
-netns_hold() {
+# The start time of the process $1 (field 22 of /proc/PID/stat), so that a
+# different process with the same PID is not the process of a file. The name
+# of the program (field 2) can have spaces, thus remove it first.
+starttime() {
+  local stat f
+  stat=$(<"/proc/$1/stat") || return 1
+  read -ra f <<<"${stat##*) }"
+  printf '%s\n' "${f[19]}"
+}
+
+# The process in the network namespace of the container (the service
+# sandbox@NAME). It sets up the namespace, starts the OpenSnitch daemon and
+# then the container. If the daemon stops, it starts the daemon again; if
+# that fails, it stops the container. It stops when the container stops.
+container_ns() {
   local dir=$1
   read -r _ <"$dir/go"
   local ips=() internet lan socks proxy_host backend
@@ -644,16 +678,32 @@ netns_hold() {
   . "$dir/net.sh"
 
   netns_setup
-  # Stop the daemon and tun2socks with this process. (systemd stops all
-  # processes of the service, but a manual start has no cgroup.)
-  trap 'kill $OSN_PID $T2S 2>/dev/null; exit 0' TERM INT
-  opensnitch_start || exit 1
-  : >"$dir/up"
-  while :; do
-    wait "$OSN_PID" || true
-    warn "opensnitchd stopped: start it again"
-    sleep 1
+  OSN_PID="" BPID=""
+  # Stop the daemon, tun2socks and the container with this process.
+  # (systemd stops all processes of the service, but a manual start has no
+  # cgroup.)
+  trap 'kill $OSN_PID $T2S $BPID 2>/dev/null; exit 0' TERM INT
+  if [ "$opensnitch" = true ]; then
     opensnitch_start || exit 1
+  fi
+  "$backend" start "$dir/plan.json" </dev/null &
+  BPID=$!
+  local rc
+  while :; do
+    rc=0
+    wait -n "$BPID" ${OSN_PID:+"$OSN_PID"} || rc=$?
+    if ! kill -0 "$BPID" 2>/dev/null; then
+      kill $OSN_PID $T2S 2>/dev/null || true
+      exit "$rc"
+    fi
+    if [ -n "$OSN_PID" ] && ! kill -0 "$OSN_PID" 2>/dev/null; then
+      warn "opensnitchd stopped: start it again"
+      sleep 1
+      opensnitch_start || {
+        kill "$BPID" $T2S 2>/dev/null
+        exit 1
+      }
+    fi
   done
 }
 
@@ -700,64 +750,126 @@ run_private() {
   return "$rc"
 }
 
-# The runtime directory of the service sandbox-net@NAME.
-net_dir() { printf '%s/sandbox-net-%s\n' "${XDG_RUNTIME_DIR:-/tmp}" "$1"; }
+# The directory of the sandbox $1 in the runtime directory: caller.env (the
+# environment of the last run that started a scope) and c-<ID>, the
+# directory of the container that the service sandbox@NAME with the
+# invocation ID <ID> started. The sandbox does not see it.
+sandbox_dir() { printf '%s/sandboxes/%s\n' "${XDG_RUNTIME_DIR:-/tmp}" "$1"; }
 
-# The service sandbox-net@NAME: the network namespace of the sandbox NAME, for
-# all runs of NAME. The process in the namespace writes $dir/up when the
-# namespace and the OpenSnitch daemon are ready. Then this process writes the
-# PID of that process to $dir/pid, and a run enters its namespace (refer to
-# run_shared).
-cmd_netd() {
-  [ $# -eq 1 ] || die "usage: sandbox __netd NAME"
+# The service sandbox@NAME: the container of the sandbox NAME, for all runs of
+# NAME in a scope. It makes the network namespace (slirp4netns, the firewall,
+# the OpenSnitch daemon) and starts the backend with sandbox-init, which
+# starts the private X server and the session bus and stays. The service
+# writes "up" in its directory when the backend can start programs in the
+# container (refer to join_container).
+cmd_container() {
+  [ $# -eq 1 ] || die "usage: sandbox __container NAME"
+  local dir
+  dir=$(sandbox_dir "$1")
+  # The container gets the environment of the run that starts it, not the
+  # environment of systemd: the mounts come from it (the Wayland socket, the
+  # SSH agent, the XDG directories).
+  if [ -z "${SANDBOX__CALLER_ENV:-}" ] && [ -r "$dir/caller.env" ]; then
+    local vars=() v
+    while IFS= read -r -d '' v; do
+      case $v in
+        BASH_FUNC_* | PWD=* | OLDPWD=* | SHLVL=* | _=* | SANDBOX__*) ;;
+        *) vars+=("$v") ;;
+      esac
+    done <"$dir/caller.env"
+    exec env -i "${vars[@]}" SANDBOX__CALLER_ENV=1 "INVOCATION_ID=${INVOCATION_ID:-}" \
+      "$SELF" __container "$1"
+  fi
+  unset SANDBOX__CALLER_ENV
+  [ -n "${INVOCATION_ID:-}" ] || die "sandbox __container runs only in the service sandbox@NAME"
   load_env "$1"
-  [ "$E_OPENSNITCH" = true ] || die "the sandbox $NAME has no opensnitch, so each run has its own network"
-  TMP=$(net_dir "$NAME")
-  rm -rf "$TMP"
+  cd "$HOME"
+
+  rm -rf "$dir"/c-*
+  TMP=$dir/c-$INVOCATION_ID
   mkdir -m 0700 "$TMP"
-  NS_PID="" SLIRP_PID=""
-  trap 'kill $NS_PID $SLIRP_PID 2>/dev/null; rm -rf "$TMP"' EXIT
+  NS_PID="" SLIRP_PID="" CPID=""
+  trap 'kill $NS_PID $SLIRP_PID $CPID 2>/dev/null; rm -rf "$TMP"' EXIT
   trap 'exit 0' TERM INT
+
+  printf 'nameserver 10.0.2.3\n' >"$TMP/resolv.conf"
+  P_MODE=container P_STATE=$TMP/backend
+  build_plan
+  make_plan_json "${INIT[@]}" >"$TMP/plan.json"
+  printf '%s\n' "$BACKEND" >"$TMP/backend.path"
 
   # slirp4netns gets the label in its environment. A rule of the daemon of
   # the host can then find the slirp4netns of this sandbox (allowOnHost).
   export SANDBOX_NAME=$NAME SANDBOX_COLOR=$E_COLOR
-  netns_start __netns_hold </dev/null
+  local pids
+  if [ "$NET" = private ]; then
+    netns_start __container_ns </dev/null
+    pids=("$NS_PID" "$SLIRP_PID")
+  else
+    "$BACKEND" start "$TMP/plan.json" </dev/null &
+    CPID=$!
+    pids=("$CPID")
+  fi
 
-  local n=0
-  until [ -e "$TMP/up" ]; do
-    kill -0 "$NS_PID" 2>/dev/null || die "the network namespace of $NAME stopped"
+  local n=0 p
+  until [ -e "$P_STATE/ready" ]; do
+    for p in "${pids[@]}"; do
+      kill -0 "$p" 2>/dev/null || die "the container of $NAME stopped"
+    done
     n=$((n + 1))
-    [ $n -lt 3000 ] || die "the network namespace of $NAME was not ready in 30 s"
+    [ $n -lt 3000 ] || die "the container of $NAME was not ready in 30 s"
     sleep 0.01
   done
-  echo "$NS_PID" >"$TMP/pid"
-  echo "sandbox: the network of $NAME is ready"
+  # A run in a private network enters the network namespace of this process
+  # first.
+  if [ -n "$NS_PID" ]; then
+    printf '%s %s\n' "$NS_PID" "$(starttime "$NS_PID")" >"$TMP/netns"
+  fi
+  : >"$TMP/up"
+  echo "sandbox: the container of $NAME is ready"
 
-  # Stop when the namespace process or slirp4netns stops.
+  # Stop when the container, the namespace process or slirp4netns stops.
   local rc=0
-  wait -n "$NS_PID" "$SLIRP_PID" || rc=$?
-  kill "$NS_PID" "$SLIRP_PID" 2>/dev/null || true
-  die "the network of $NAME stopped (exit code $rc)"
+  wait -n "${pids[@]}" || rc=$?
+  die "the container of $NAME stopped (exit code $rc)"
 }
 
-# Start the backend in the network namespace of the service sandbox-net@NAME.
-# The scope of the run requires the service, so systemd starts it first (refer
-# to cmd_run).
-run_shared() {
-  local dir pid="" n=0
-  dir=$(net_dir "$NAME")
-  until [ -s "$dir/pid" ] && pid=$(<"$dir/pid") && kill -0 "$pid" 2>/dev/null; do
-    local hint="refer to: journalctl --user -u sandbox-net@$NAME"
-    systemctl --user -q is-active "sandbox-net@$NAME.service" ||
-      die "the network of $NAME did not start; $hint"
+# Wait until the service sandbox@NAME has started the container. CDIR is the
+# directory of the container. The scope of the run requires the service, so
+# systemd starts it first (refer to cmd_run).
+join_container() {
+  local unit="sandbox@$NAME.service" id n=0
+  local hint="refer to: journalctl --user -u $unit"
+  until id=$(systemctl --user show -p InvocationID --value "$unit") && [ -n "$id" ] &&
+    CDIR=$(sandbox_dir "$NAME")/c-$id && [ -e "$CDIR/up" ]; do
+    systemctl --user -q is-active "$unit" || die "the container of $NAME did not start; $hint"
     n=$((n + 1))
-    [ $n -lt 3000 ] || die "the network of $NAME was not ready in 30 s; $hint"
-    sleep 0.01
+    [ $n -lt 1500 ] || die "the container of $NAME was not ready in 30 s; $hint"
+    sleep 0.02
   done
-  # The namespace has no setgroups, so keep the credentials: the user is
-  # root in the namespace.
-  nsenter --user --net --preserve-credentials --target "$pid" -- "$BACKEND" run "$TMP/plan.json"
+}
+
+# Start the program of the plan in the container of the sandbox.
+run_joined() {
+  local backend pid start
+  backend=$(<"$CDIR/backend.path")
+  # The mounts of the container come from the configuration and the
+  # environment when the container started.
+  local changed
+  changed=$(jq -rn --slurpfile a "$CDIR/plan.json" --slurpfile b "$TMP/plan.json" '
+    ($a[0].mounts - $b[0].mounts) + ($b[0].mounts - $a[0].mounts) | map(.target) | unique | join(", ")')
+  if [ -n "$changed" ]; then
+    warn "the container of $NAME started with different mounts ($changed): a different configuration or environment. 'sandbox stop $NAME' stops it and its programs; the next run starts it again."
+  fi
+  if [ -e "$CDIR/netns" ]; then
+    read -r pid start <"$CDIR/netns"
+    [ "$(starttime "$pid" 2>/dev/null)" = "$start" ] || die "the network of the container of $NAME stopped"
+    # The namespace has no setgroups, so keep the credentials: the user is
+    # root in the namespace.
+    nsenter --user --net --preserve-credentials --target "$pid" -- "$backend" exec "$TMP/plan.json"
+  else
+    "$backend" exec "$TMP/plan.json"
+  fi
 }
 
 cmd_run() {
@@ -774,17 +886,19 @@ cmd_run() {
   has_env "$name" || die "no sandbox has the name '$name'. Run 'sandbox list'."
 
   # Put each run in a scope below sandbox-NAME.slice. A scope keeps the
-  # environment of the caller.
+  # environment of the caller. The run requires the container of the
+  # sandbox: systemd starts sandbox@NAME before the scope, and stops it after
+  # the last scope. The container gets the environment of this run.
   if [ -z "${SANDBOX_NO_SCOPE:-}" ] && [ -z "${SANDBOX__SCOPED:-}" ] &&
     [ -S "${XDG_RUNTIME_DIR:-/nonexistent}/systemd/private" ]; then
-    # With opensnitch, the run requires the network of the sandbox:
-    # systemd starts sandbox-net@NAME before the scope, and stops it after
-    # the last scope.
-    local net=()
-    if jq -e --arg n "$name" '.environments[$n].opensnitch.enable' "$CONFIG" >/dev/null; then
-      net=(--property="Requires=sandbox-net@$name.service" --property="After=sandbox-net@$name.service")
-    fi
-    exec systemd-run --user --scope --quiet --collect "${net[@]}" \
+    local dir
+    dir=$(sandbox_dir "$name")
+    mkdir -m 0700 "${dir%/*}" 2>/dev/null || true
+    mkdir -m 0700 "$dir" 2>/dev/null || true
+    env -0 >"$dir/caller.env.$$"
+    mv -f "$dir/caller.env.$$" "$dir/caller.env"
+    exec systemd-run --user --scope --quiet --collect \
+      --property="Requires=sandbox@$name.service" --property="After=sandbox@$name.service" \
       --slice="sandbox-$name.slice" --unit="sandbox-$name-$$-$RANDOM" \
       --description="sandbox $name: $*" \
       -- env SANDBOX__SCOPED=1 "$SELF" run "${need_cwd[@]}" "$name" -- "$@"
@@ -792,7 +906,14 @@ cmd_run() {
 
   load_env "$name"
   TMP=$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/sandbox-$name.XXXXXX")
-  printf 'nameserver 10.0.2.3\n' >"$TMP/resolv.conf"
+  # A run in a scope starts its program in the container of the sandbox. A
+  # run without a scope has no service: it gets a container of its own.
+  if [ -n "${SANDBOX__SCOPED:-}" ]; then
+    join_container
+    P_MODE=join P_STATE=$CDIR/backend P_RESOLV=$CDIR/resolv.conf
+  else
+    printf 'nameserver 10.0.2.3\n' >"$TMP/resolv.conf"
+  fi
   build_plan
   if [ ${#need_cwd[@]} -gt 0 ] && [ "$HAS_CWD" = false ]; then
     rm -rf "$TMP"
@@ -809,10 +930,10 @@ cmd_run() {
   # files of the run after the program.
   trap : INT
   local rc=0
-  if [ "$NET" = private ]; then
+  if [ "$P_MODE" = join ]; then
+    run_joined || rc=$?
+  elif [ "$NET" = private ]; then
     run_private || rc=$?
-  elif [ "$NET" = shared ]; then
-    run_shared || rc=$?
   else
     "$BACKEND" run "$TMP/plan.json" || rc=$?
   fi
@@ -979,9 +1100,9 @@ main() {
       # netns_inner does not return.
       netns_inner "$@"
       ;;
-    __netns_hold)
-      # netns_hold does not return.
-      netns_hold "$@"
+    __container_ns)
+      # container_ns does not return.
+      container_ns "$@"
       ;;
     current)
       cmd_current
@@ -1001,7 +1122,7 @@ main() {
     ps) cmd_ps ;;
     stop) cmd_stop "$@" ;;
     host) cmd_host "$@" ;;
-    __netd) cmd_netd "$@" ;;
+    __container) cmd_container "$@" ;;
     backends) jq -r '.backends | to_entries[] | "\(.key)\t\(.value)"' "$CONFIG" ;;
     home)
       load_env "${1:?usage: sandbox home NAME}"

@@ -302,8 +302,73 @@ in
         assert "SANDBOX_COLOR=#008080" in env, env
         client.succeed("pkill -u alice -x sleep")
 
+    run = "su - alice -c 'XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus "
+
+    def sc(env, cmd, ok=True):
+        # A run in a scope: the program starts in the container of the sandbox.
+        line = run + f"sandbox run {env} -- sh -c \"{cmd}\"'"
+        return client.succeed(line) if ok else client.fail(line)
+
+    def active(env):
+        return client.execute(run + f"systemctl --user -q is-active sandbox@{env}.service'")[0] == 0
+
+    with subtest("container"):
+        bus_id = "dbus-send --session --print-reply --dest=org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.GetId | tail -1"
+        for env, uid in [("net", "1000"), ("none", "1000"), ("hostnet", "1000"), ("gnet", "0")]:
+            # The first run starts the container; it stays while a run runs.
+            client.succeed(run + f"sandbox run {env} -- sleep 300 >/dev/null 2>&1 &'")
+            client.wait_until_succeeds(run + f"systemctl --user -q is-active sandbox@{env}.service'")
+            # The next runs see the processes, /tmp and the session bus of the
+            # container. A run without a scope has a container of its own.
+            # (The container holds a "sleep 3600" of sandbox-init.) The first
+            # run can start its program after the next run.
+            client.wait_until_succeeds(run + f"sandbox run {env} -- sh -c \"pgrep -xf sleep.300\"'")
+            sb(env, "pgrep -xf sleep.300", ok=False)
+            sc(env, "echo x > /tmp/joined")
+            sc(env, "test -e /tmp/joined")
+            sb(env, "test ! -e /tmp/joined")
+            assert sc(env, bus_id) == sc(env, bus_id), env
+            assert sc(env, bus_id) != sb(env, bus_id), env
+            assert sc(env, "id -u").strip() == uid, env
+            assert sc(env, "hostname").strip() == env, env
+            sc(env, "test ! -e ~/secret")
+            # The network of the container.
+            if env == "none":
+                sc(env, inet, ok=False)
+            else:
+                sc(env, inet)
+            # The exit code and the directory of the program.
+            rc = client.execute(run + f"sandbox run {env} -- sh -c \"exit 7\"'")[0]
+            assert rc == 7, f"{env}: exit code {rc}"
+            assert sc(env, "pwd").strip() == "/home/alice", env
+            # The program has no capabilities and cannot get new privileges,
+            # as in a run of its own.
+            if env != "gnet":
+                assert sc(env, "grep CapEff /proc/self/status").split()[1] == "0000000000000000", env
+                assert sc(env, "grep NoNewPrivs /proc/self/status").split()[1] == "1", env
+                # The mounts of the container stay read-only.
+                sc(env, "touch /etc/x", ok=False)
+            # The container stops after the last run.
+            sc(env, "pkill -xf sleep.300")
+            client.wait_until_succeeds(f"! su - alice -c 'XDG_RUNTIME_DIR=/run/user/1000 systemctl --user -q is-active sandbox@{env}.service'")
+        # The program starts in the current directory if the sandbox has it.
+        out = client.succeed("su - alice -c 'cd ~/work/a && XDG_RUNTIME_DIR=/run/user/1000 sandbox run --need-cwd agents -- pwd'")
+        assert out.strip() == "/home/alice/work/a", out
+        # A program of a run can stay after the command of the run. The scope
+        # of the run, and thus the container, stay with it.
+        sc("net", "sleep 302 >/dev/null 2>&1 & echo started")
+        client.succeed("pgrep -u alice -xf 'sleep 302'")
+        assert active("net")
+        client.succeed(run + "sandbox stop net'")
+        client.wait_until_fails("pgrep -u alice -xf 'sleep 302'")
+        assert not active("net")
+        # A terminal, and the exit code of a program with a terminal.
+        for env in ["net", "gnet"]:
+            assert "is-tty" in client.succeed(run + f"timeout 60 script -qec \"sandbox run {env} -- sh -c \\\"test -t 0 && test -t 1 && echo is-tty\\\"\" /dev/null'"), env
+            rc = client.execute(run + f"timeout 60 script -qec \"sandbox run {env} -- sh -c \\\"exit 7\\\"\" /dev/null'")[0]
+            assert rc == 7, f"{env}: exit code {rc}"
+
     with subtest("scopes"):
-        run = "su - alice -c 'XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus "
         client.succeed(run + "sandbox run net -- sleep 300 >/dev/null 2>&1 &'")
         client.wait_until_succeeds(run + "sandbox ps' | grep -q '^net .*sleep 300'")
         # The run is in the declared slice of the sandbox. A window manager
@@ -311,11 +376,14 @@ in
         assert "Sandbox net" in client.succeed(run + "systemctl --user show -p Description sandbox-net.slice'")
         # The scope is there before the program: the private network starts
         # first.
-        pid = client.wait_until_succeeds("pgrep -u alice -x sleep").split()[0]
+        pid = client.wait_until_succeeds("pgrep -u alice -xf 'sleep 300'").split()[0]
         cgroup = client.succeed(f"cat /proc/{pid}/cgroup")
         assert "/sandbox.slice/sandbox-net.slice/sandbox-net-" in cgroup, cgroup
+        # The container is in the same slice.
+        assert "sandbox-net.slice" in client.succeed(run + "systemctl --user show -p Slice sandbox@net.service'")
         client.succeed(run + "sandbox stop net'")
-        client.wait_until_fails("pgrep -u alice -x sleep")
+        client.wait_until_fails("pgrep -u alice -xf 'sleep 300'")
+        assert not active("net")
 
     with subtest("host"):
         # The program leaves the cgroup of the caller for its own scope below

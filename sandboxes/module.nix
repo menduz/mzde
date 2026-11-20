@@ -521,8 +521,9 @@ let
         gui = bool true "Mount the Wayland socket, /dev/dri and /sys.";
         x11 = serviceMode ''
           The X server of the sandbox. Needs `gui`.
-          - "private": an X server for each run (xwayland-satellite). X11
-            clients see no X11 client of the host or of other sandboxes.
+          - "private": an X server for the sandbox (xwayland-satellite), for
+            all runs. X11 clients see no X11 client of the host or of other
+            sandboxes.
           - "host": the X sockets of the host. An X11 client can read the
             keyboard and the screen of all other X11 clients, so this removes
             the isolation.
@@ -531,8 +532,9 @@ let
         '';
         dbus = serviceMode ''
           The D-Bus session bus of the sandbox.
-          - "private": a session bus for each run. The programs of the run can
-            use D-Bus, and they see nothing of the host.
+          - "private": a session bus for the sandbox, for all runs. The
+            programs of the sandbox can use D-Bus, and they see nothing of
+            the host.
           - "host": the session bus of the host. A program with the session
             bus can start programs outside the sandbox, so this removes the
             isolation.
@@ -600,10 +602,11 @@ let
         mountTmp = bool false "Mount the /tmp of the host in place of a tmpfs.";
         sharedTmp = bool false ''
           Mount /tmp/sandbox-<uid>-<name> of the host at /tmp, in place of a
-          tmpfs for each run. All runs of the sandbox share this /tmp, so a
-          program can connect to a socket in /tmp of a different run. The
-          host removes old files in /tmp (systemd-tmpfiles). `mountTmp`
-          replaces this option.
+          tmpfs. The runs in the container of the sandbox share its tmpfs;
+          with this option, the files stay when the container stops, and the
+          runs without a scope (SANDBOX_NO_SCOPE) get the same /tmp. The host
+          removes old files in /tmp (systemd-tmpfiles). `mountTmp` replaces
+          this option.
         '';
         mounts = mkOption {
           type = types.listOf (
@@ -631,10 +634,11 @@ let
             before slirp4netns, and it asks the OpenSnitch GUI of the host.
             The GUI shows the daemon as the node "unix:/<name>".
 
-            All runs of the sandbox then share one network namespace, so the
-            sandbox has one daemon: the user service sandbox-net@<name> holds
-            the namespace, slirp4netns, the firewall and the daemon. The
-            service stops after the last run. Needs a private network (not
+            The sandbox has one daemon: the container of the sandbox (the
+            user service sandbox@<name>) holds the network namespace,
+            slirp4netns, the firewall and the daemon. The service stops after
+            the last run. A run without a scope (SANDBOX_NO_SCOPE) gets a
+            daemon of its own. Needs a private network (not
             `disableNetworking` or `shareHostNetwork`).
           '';
 
@@ -1227,15 +1231,18 @@ in
     ) (lib.filterAttrs (_: e: e.dconfSettings != { }) cfg.environments);
     environment.etc."sandboxes/config.json".source = configFile;
 
-    # The network of a sandbox with opensnitch: one network namespace for all
-    # runs, with slirp4netns, the firewall and the OpenSnitch daemon. Each run
-    # requires the service, so the service starts before the first run and
-    # stops after the last run.
-    systemd.user.services."sandbox-net@" = lib.mkIf anyOpensnitch {
-      description = "Network of the sandbox %i";
+    # The container of a sandbox: the network namespace with slirp4netns, the
+    # firewall and the OpenSnitch daemon, and the backend with the private X
+    # server and session bus. Each run in a scope starts its program in the
+    # container. Each run requires the service, so the service starts before
+    # the first run and stops after the last run. The service is in the slice
+    # of the sandbox: a window manager finds the sandbox of the X server from
+    # its cgroup.
+    systemd.user.services."sandbox@" = {
+      description = "Container of the sandbox %i";
       unitConfig.StopWhenUnneeded = true;
       serviceConfig = {
-        ExecStart = "${lib.getExe cfg.package} __netd %i";
+        ExecStart = "${lib.getExe cfg.package} __container %i";
         Slice = "sandbox-%i.slice";
       };
     };

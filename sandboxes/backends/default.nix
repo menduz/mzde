@@ -1,6 +1,8 @@
 # The backends of `sandbox`. A backend is a command with the interface
 #
 #   <backend> run PLAN.json    start the program of the plan
+#   <backend> start PLAN.json  start the container of a sandbox
+#   <backend> exec PLAN.json   start the program of the plan in that container
 #   <backend> show PLAN.json   print the command, and do not start it
 #
 # Refer to README.md for the format of the plan.
@@ -10,6 +12,7 @@
   coreutils,
   gvisor,
   jq,
+  procps,
   util-linux,
 }:
 {
@@ -18,6 +21,8 @@
     runtimeInputs = [
       bubblewrap
       jq
+      procps
+      util-linux
     ];
     text = builtins.readFile ./bwrap.sh;
     meta.description = "The bubblewrap backend of sandbox";
