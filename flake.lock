@@ -41,11 +41,11 @@
     "kwm": {
       "flake": false,
       "locked": {
-        "lastModified": 1795099924,
-        "narHash": "sha256-fTCFdeaW7CDQpxLy0NByXYxII6VWA7FRXvg835h82+4=",
+        "lastModified": 1795183547,
+        "narHash": "sha256-g1zKuxap11fBQ2aqEldXA0LDkjSy5EVTHw/BwnvLJx4=",
         "ref": "refs/heads/master",
-        "rev": "519b826123dac876ef85568ff330dff630d87cd6",
-        "revCount": 733,
+        "rev": "865ba01a5d283c1e583331ff188a32bb73599e85",
+        "revCount": 734,
         "type": "git",
         "url": "https://github.com/menduz/kwm.git"
       },
@@ -88,6 +88,23 @@
         "type": "github"
       }
     },
+    "opensnitch": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1795183554,
+        "narHash": "sha256-9ScHEuZ66WnrWRHxobHh7yY2VP7vOtRz6hnx5QplObg=",
+        "ref": "refs/heads/fork",
+        "rev": "c8d9130b8ea8df1be209fa2507f30b05f7a053ae",
+        "revCount": 2299,
+        "type": "git",
+        "url": "https://github.com/menduz/opensnitch.git"
+      },
+      "original": {
+        "ref": "fork",
+        "type": "git",
+        "url": "https://github.com/menduz/opensnitch.git"
+      }
+    },
     "river": {
       "flake": false,
       "locked": {
@@ -112,6 +129,7 @@
         "kwm": "kwm",
         "mz-term-colors": "mz-term-colors",
         "nixpkgs": "nixpkgs",
+        "opensnitch": "opensnitch",
         "river": "river",
         "waylock": "waylock",
         "win-classic-theme": "win-classic-theme"

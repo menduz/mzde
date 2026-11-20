@@ -1,14 +1,23 @@
-# The demo system of the screenshots: mzde with the theme settings of
-# nix-config, the configuration of its author. The argument is the variant of
-# the theme: "dark" or "light".
-variant:
-{ ... }:
+# The demo system of the screenshots: mzde with the theme settings and the
+# sandbox "code" of nix-config, the configuration of its author. The argument
+# is the screenshot: "dark", "light", or "sandbox" (the dark scheme, with the
+# sandbox "code").
+scene:
+{ config, ... }:
 let
+  variant = if scene == "sandbox" then "dark" else scene;
   theme = {
     inherit variant;
     name = "win-classic";
     # Redmond97 SE "Dusk Red".
     dark.preset = "dark";
+    # The kwm bar of the dark scheme stays black, in the colors of mzde.
+    dark.colors = with config.mzde.colors.bar; {
+      barbg = background;
+      barfg = foreground;
+      barselectedfg = selected;
+      baremptyfg = emptyTag;
+    };
     # The Windows XP classic scheme "Windows Standard".
     light.preset = "windows-standard";
     # kwm tiles the windows, so no window has these buttons.
@@ -37,4 +46,25 @@ in
   mzde.enable = true;
   programs.win-classic-theme = theme;
   home-manager.sharedModules = [ { programs.win-classic-theme = theme; } ];
+
+  programs.sandboxes = {
+    enable = scene == "sandbox";
+    environments.code = {
+      description = "code and editors";
+      winTheme.preset = "teal";
+      backend = "bwrap";
+      paths = [ "~/code" ];
+      git = "read";
+      ssh = "read";
+    };
+  };
+  mzde.sandboxes.homeManagerUser = "demo";
+  # The terminal of the sandbox floats above the terminals of the host, with
+  # the title bar of kwm.
+  mzde.floatRules = [
+    {
+      title = "~/code";
+      decoration = "ssd";
+    }
+  ];
 }

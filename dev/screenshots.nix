@@ -1,6 +1,7 @@
 # The screenshots of mzde: river with the headless backend of wlroots, kwm
 # with the configuration of the module, Ghostty and Thunar, in the dark and in
-# the light scheme of the theme. Refer to screenshot.sh.
+# the light scheme of the theme; and a terminal of the sandbox "code" above two
+# terminals of the host. Refer to screenshot.sh.
 #
 # The demo system (demo.nix) gives the files of the home directory, so the
 # screenshots show the configuration that a user of mzde gets. The bar always
@@ -31,10 +32,14 @@ let
 
   # Fixed values for the CPU, memory, disk and battery widgets of kwm. The
   # library is in the kwm source. Refer to nix/screenshot-preload.c in kwm.
+  # The second library gives fixed values to the widgets of mzde and the
+  # sandbox of each window. Refer to screenshot-preload.c.
   preload = pkgs.runCommandCC "mzde-screenshot-preload" { } ''
     mkdir -p "$out/lib"
     $CC -shared -fPIC -O2 -Wall -Wextra -o "$out/lib/screenshot-preload.so" \
       ${inputs.kwm}/nix/screenshot-preload.c -ldl
+    $CC -shared -fPIC -O2 -Wall -Wextra -o "$out/lib/mzde-screenshot-preload.so" \
+      ${./screenshot-preload.c} -ldl
   '';
 
   # The fonts of the demo system: Inter for GTK, Terminus for the bar, the
@@ -85,6 +90,7 @@ let
     let
       config = demo variant;
       user = config.home-manager.users.demo;
+      sandbox = config.programs.sandboxes.environments.code;
     in
     pkgs.writeText "mzde-screenshot-${variant}.env" ''
       HOME_FILES=${user.home-files}
@@ -94,9 +100,18 @@ let
       GHOSTTY_THEME=${
         termColors.ghosttyTheme {
           color = config.mzde.colors.border.focus;
-          inherit variant;
+          variant = config.programs.win-classic-theme.variant;
         }
       }
+      ${lib.optionalString (variant == "sandbox") ''
+        SANDBOX_BIN=${lib.getExe config.programs.sandboxes.package}
+        SANDBOXES_CONFIG=${config.programs.sandboxes.configFile}
+        SANDBOX_COLOR=${sandbox.color}
+        SANDBOX_GHOSTTY_CONFIG=${sandbox.files.".config/ghostty/config".source}
+        SANDBOX_GSETTINGS=${gsettingsKeyfile "sandbox-code" { dconf.settings = sandbox.dconfSettings; }}
+        SANDBOX_DATA_DIR=${sandbox.winTheme.package}/share
+        SANDBOX_THEME=${sandbox.gtkTheme}
+      ''}
     '';
 
   screenshot = pkgs.writeShellApplication {
@@ -120,6 +135,7 @@ let
       export EXTRA_DATA_DIRS=${pkgs.xfconf}/share:${pkgs.thunar}/share:${pkgs.ghostty}/share
       export FAKETIME_LIB=${pkgs.libfaketime}/lib/libfaketime.so.1
       export PRELOAD_LIB=${preload}/lib/screenshot-preload.so
+      export MZDE_PRELOAD_LIB=${preload}/lib/mzde-screenshot-preload.so
       export TRAY_SCRIPT=${inputs.kwm}/nix/screenshot-tray.py
       # Ghostty needs OpenGL. Mesa draws with the processor (llvmpipe) into
       # shared memory, so no GPU is necessary.
@@ -132,6 +148,7 @@ let
   variants = [
     "dark"
     "light"
+    "sandbox"
   ];
 in
 {

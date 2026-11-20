@@ -216,6 +216,7 @@ let
     rule:
     lib.optionalAttrs (rule.appId != null) { app_id.str = rule.appId; }
     // lib.optionalAttrs (rule.title != null) { title.str = rule.title; }
+    // lib.optionalAttrs (rule.decoration != null) { decoration = zon.enum rule.decoration; }
     // {
       floating = true;
     };

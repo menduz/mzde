@@ -1,11 +1,19 @@
 # Takes a screenshot of mzde: river with the headless backend of wlroots, kwm
-# with the configuration of the demo system, three tray items, Thunar and
-# Ghostty. Run it with the environment of `mzde-screenshot` in screenshots.nix.
+# with the configuration of the demo system, three tray items, and the
+# windows of the variant:
+#
+#   - dark, light: Thunar and Ghostty.
+#   - sandbox: two Ghostty windows on the host, and a floating Ghostty in the
+#     sandbox "code", with the Ghostty configuration, the GTK theme and the
+#     GSettings of that sandbox.
+#
+# Run it with the environment of `mzde-screenshot` in screenshots.nix.
 #
 # Usage: mzde-screenshot <output directory> <variant> <settings file>
 #
 # The settings file gives HOME_FILES, GSETTINGS_KEYFILE, HOME_PATH, THEME_NAME
-# and GHOSTTY_THEME of the variant. The script writes <output directory>/<variant>.png.
+# and GHOSTTY_THEME of the variant, and the SANDBOX_* values of the sandbox
+# variant. The script writes <output directory>/<variant>.png.
 #
 # The bar shows fixed values: the clock is 12:00, the CPU meter 25%, the
 # memory meter 40%, and there is no battery. Thus the image changes only when
@@ -55,8 +63,10 @@ mkdir -p "$HOME"/{Documents,Downloads,Music,Pictures,Projects}
 printf 'Buy milk\n' >"$HOME/notes.txt"
 printf '# To do\n' >"$HOME/todo.md"
 
-# The packages of the user: the theme, its icon themes, kwm and kwim.
-export XDG_DATA_DIRS=$HOME_PATH/share:$EXTRA_DATA_DIRS
+# The packages of the user: the theme, its icon themes, kwm and kwim. The
+# system has the themes of the sandboxes: kwm draws the title bar of a window
+# of a sandbox in the scheme of the sandbox.
+export XDG_DATA_DIRS=$HOME_PATH/share:$EXTRA_DATA_DIRS${SANDBOX_DATA_DIR:+:$SANDBOX_DATA_DIR}
 export PATH=$HOME_PATH/bin:$PATH
 
 # The GTK programs read the theme, the icon theme and the font from GSettings,
@@ -95,14 +105,18 @@ cat >"$XDG_CONFIG_HOME/xfce4/xfconf/xfce-perchannel-xml/thunar.xml" <<'XML'
 XML
 
 # kwm gets a fixed clock, and fixed values for the CPU, the memory and the
-# disk. The clock starts at 12:00:00 and runs, but the bar shows only the
-# minutes. The other programs have the real clock.
+# disks. In the sandbox variant, kwm reads the configuration of the sandboxes,
+# and a process with SANDBOX_NAME is in the slice of its sandbox. Refer to
+# screenshot-preload.c. The widgets get the same values. The clock starts at
+# 12:00:00 and runs, but the bar shows only the minutes. The other programs
+# have the real clock.
 # kwm reads the scheme from GTK_THEME here. In a session, it reads the scheme
 # from the settings portal.
 cat >"$work/kwm" <<KWM
 #!/bin/sh
 export GTK_THEME="$THEME_NAME"
-export LD_PRELOAD="$FAKETIME_LIB:$PRELOAD_LIB"
+export LD_PRELOAD="$FAKETIME_LIB:$PRELOAD_LIB:$MZDE_PRELOAD_LIB"
+${SANDBOXES_CONFIG:+export MZDE_SANDBOXES_CONFIG="$SANDBOXES_CONFIG"}
 export FAKETIME="@2026-10-04 12:00:00"
 export FAKETIME_DONT_FAKE_MONOTONIC=1
 exec kwm
@@ -131,11 +145,11 @@ sleep 1
 python3 "$TRAY_SCRIPT" audio-volume-high network-wireless-signal-excellent bluetooth-active &
 pids+=("$!")
 
-# Thunar first: kwm puts the new window in the master area, so Ghostty comes
-# to the left and has the focus.
-thunar "$HOME" >"$work/thunar.log" 2>&1 &
-pids+=("$!")
-sleep 2
+# Ghostty needs OpenGL: Mesa draws with the processor (llvmpipe).
+ghostty_llvmpipe() {
+  __EGL_VENDOR_LIBRARY_FILENAMES=$MESA_EGL_VENDOR LIBGL_DRIVERS_PATH=$MESA_DRIVERS \
+    LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe ghostty "$@"
+}
 
 # Ghostty with the colors of mz-term-colors for the accent color of mzde. The
 # shell prints a fixed text and waits.
@@ -165,10 +179,79 @@ done
 printf '\033[1;32mdemo@mzde\033[0m \033[1;34m~\033[0m $ '
 exec sleep infinity
 SHELL
-__EGL_VENDOR_LIBRARY_FILENAMES=$MESA_EGL_VENDOR LIBGL_DRIVERS_PATH=$MESA_DRIVERS \
-  LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe \
-  ghostty -e sh "$work/shell.sh" >"$work/ghostty.log" 2>&1 &
+
+# kwm puts each new window in the master area, at the left. The last window
+# has the focus.
+if [ "$variant" = sandbox ]; then
+  # The second terminal of the host shows the sandboxes. The sandbox command
+  # reads the configuration of the demo system.
+  cat >"$work/sandboxes.sh" <<'SHELL'
+cd "$HOME"
+prompt() { printf '\033[1;32mdemo@mzde\033[0m \033[1;34m~\033[0m $ %s\n' "$1"; }
+prompt "sandbox current"
+"$SANDBOX_BIN" current
+prompt "sandbox list --names"
+"$SANDBOX_BIN" list --names
+printf '\033[1;32mdemo@mzde\033[0m \033[1;34m~\033[0m $ '
+exec sleep infinity
+SHELL
+  SANDBOX_CONFIG=$SANDBOXES_CONFIG SANDBOX_BIN=$SANDBOX_BIN \
+    ghostty_llvmpipe -e sh "$work/sandboxes.sh" >"$work/ghostty-sandboxes.log" 2>&1 &
+  pids+=("$!")
+  sleep 2
+else
+  thunar "$HOME" >"$work/thunar.log" 2>&1 &
+  pids+=("$!")
+  sleep 2
+fi
+
+ghostty_llvmpipe -e sh "$work/shell.sh" >"$work/ghostty.log" 2>&1 &
 pids+=("$!")
+
+# The terminal of the sandbox "code": the home directory of the sandbox with
+# its Ghostty configuration and its GSettings, and the GTK theme of the
+# sandbox. The title "~/code" has a float rule in demo.nix. SANDBOX_NAME puts
+# the process in the slice of the sandbox for kwm (screenshot-preload.c).
+if [ "$variant" = sandbox ]; then
+  sleep 2
+  sandbox_home=$work/sandbox-code
+  mkdir -p "$sandbox_home/code" "$sandbox_home/.config/ghostty" \
+    "$sandbox_home/.config/glib-2.0/settings"
+  cp "$SANDBOX_GHOSTTY_CONFIG" "$sandbox_home/.config/ghostty/config"
+  chmod u+w "$sandbox_home/.config/ghostty/config"
+  cat >>"$sandbox_home/.config/ghostty/config" <<GHOSTTY
+window-decoration = none
+title = ~/code
+font-size = 10
+window-width = 72
+window-height = 12
+cursor-style-blink = false
+shell-integration = none
+confirm-close-surface = false
+gtk-single-instance = false
+GHOSTTY
+  cp "$SANDBOX_GSETTINGS" "$sandbox_home/.config/glib-2.0/settings/keyfile"
+  printf 'project\n' >"$sandbox_home/code/README.md"
+  mkdir -p "$sandbox_home/code/"{kwm,mzde,river}
+  cat >"$work/sandbox-shell.sh" <<'SHELL'
+cd "$HOME/code"
+color=${SANDBOX_COLOR#\#}
+badge=$(printf '\033[48;2;%d;%d;%dm\033[97m %s \033[0m' \
+  "0x${color:0:2}" "0x${color:2:2}" "0x${color:4:2}" "$SANDBOX_NAME")
+prompt() { printf '%s \033[1;34m~/code\033[0m $ %s\n' "$badge" "$1"; }
+prompt "sandbox current"
+"$SANDBOX_BIN" current
+prompt ls
+ls --color=always
+printf '%s \033[1;34m~/code\033[0m $ ' "$badge"
+exec sleep infinity
+SHELL
+  HOME=$sandbox_home XDG_CONFIG_HOME=$sandbox_home/.config \
+    GTK_THEME=$SANDBOX_THEME \
+    SANDBOX_NAME=code SANDBOX_COLOR=$SANDBOX_COLOR SANDBOX_BIN=$SANDBOX_BIN \
+    ghostty_llvmpipe -e bash "$work/sandbox-shell.sh" >"$work/ghostty-code.log" 2>&1 &
+  pids+=("$!")
+fi
 
 # The screenshot when two screenshots in a row are equal: the windows have
 # drawn, the widgets have updated, and the tray has its icons.
@@ -186,7 +269,7 @@ for _ in $(seq 30); do
 done
 if [ -z "$stable" ]; then
   echo "mzde-screenshot: the screen did not become stable" >&2
-  tail -n 20 "$work/river.log" "$work/thunar.log" "$work/ghostty.log" >&2
+  tail -n 20 "$work"/*.log >&2
   exit 1
 fi
 

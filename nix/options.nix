@@ -43,6 +43,22 @@ let
         default = null;
         description = "The title of the window. null matches all titles.";
       };
+      decoration = lib.mkOption {
+        type = lib.types.nullOr (
+          lib.types.enum [
+            "ssd"
+            "csd"
+          ]
+        );
+        default = null;
+        description = ''
+          The decorations of the window: "ssd" (the border and the title bar
+          of kwm) or "csd" (the window draws its own). kwm uses only the first
+          rule that matches a window, thus the decoration rules of mzde (for
+          Ghostty) do not apply to a window of this rule. null: the window
+          draws its own decorations if it does not use xdg-decoration.
+        '';
+      };
     };
   };
 

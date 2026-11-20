@@ -42,6 +42,12 @@
       url = "git+https://github.com/menduz/mz-term-colors.git?ref=main";
       flake = false;
     };
+    # The OpenSnitch fork: overlays.opensnitch builds it. Refer to
+    # nix/opensnitch.nix.
+    opensnitch = {
+      url = "git+https://github.com/menduz/opensnitch.git?ref=fork";
+      flake = false;
+    };
   };
 
   outputs =
@@ -68,6 +74,10 @@
       # The named sandboxes and the `sandbox` command, without the desktop.
       # The desktop imports it. Refer to sandboxes/README.md.
       nixosModules.sandboxes = ./sandboxes/module.nix;
+
+      # The OpenSnitch fork in place of opensnitch of nixpkgs (the daemon, the
+      # UI, the eBPF modules). Refer to nix/opensnitch.nix.
+      overlays.opensnitch = import ./nix/opensnitch.nix inputs;
 
       # The Nix library of mz-term-colors: `lib.termColors { inherit pkgs; }`.
       lib.termColors = import "${inputs.mz-term-colors}/lib";
@@ -115,8 +125,9 @@
           );
         };
 
-      # `nix run .#screenshots` writes screenshots/dark.png and
-      # screenshots/light.png. Refer to dev/screenshots.nix.
+      # `nix run .#screenshots` writes screenshots/dark.png,
+      # screenshots/light.png and screenshots/sandbox.png. Refer to
+      # dev/screenshots.nix.
       apps.x86_64-linux.screenshots = {
         type = "app";
         program = nixpkgs.lib.getExe shots.update;
