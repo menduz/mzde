@@ -121,7 +121,10 @@
           # The network modes, the home directory, the commands and the
           # labels of the sandboxes, with bubblewrap and gVisor.
           sandboxes = pkgs.testers.runNixOSTest (
-            import ./sandboxes/test.nix { module = self.nixosModules.sandboxes; }
+            import ./sandboxes/test.nix {
+              module = self.nixosModules.sandboxes;
+              opensnitchOverlay = self.overlays.opensnitch;
+            }
           );
         };
 

@@ -1,4 +1,6 @@
-# The backends of `sandbox`. A backend is a command with the interface
+# The built-in backends of `sandbox`: links to the `sandbox` program, which
+# selects the backend by the name of the link (refer to src/backend.rs). A
+# backend is a command with the interface
 #
 #   <backend> run PLAN.json    start the program of the plan
 #   <backend> start PLAN.json  start the container of a sandbox
@@ -7,36 +9,25 @@
 #
 # Refer to README.md for the format of the plan.
 {
-  writeShellApplication,
-  bubblewrap,
-  coreutils,
-  gvisor,
-  jq,
-  procps,
-  util-linux,
+  runCommand,
+  sandbox,
 }:
+let
+  backend =
+    name:
+    runCommand "sandbox-backend-${name}"
+      {
+        meta = {
+          description = "The ${name} backend of sandbox";
+          mainProgram = "sandbox-backend-${name}";
+        };
+      }
+      ''
+        mkdir -p $out/bin
+        ln -s ${sandbox}/bin/sandbox-backend-${name} $out/bin/sandbox-backend-${name}
+      '';
+in
 {
-  bwrap = writeShellApplication {
-    name = "sandbox-backend-bwrap";
-    runtimeInputs = [
-      bubblewrap
-      jq
-      procps
-      util-linux
-    ];
-    text = builtins.readFile ./bwrap.sh;
-    meta.description = "The bubblewrap backend of sandbox";
-  };
-
-  gvisor = writeShellApplication {
-    name = "sandbox-backend-gvisor";
-    runtimeInputs = [
-      coreutils
-      gvisor
-      jq
-      util-linux
-    ];
-    text = builtins.readFile ./gvisor.sh;
-    meta.description = "The gVisor (runsc) backend of sandbox";
-  };
+  bwrap = backend "bwrap";
+  gvisor = backend "gvisor";
 }

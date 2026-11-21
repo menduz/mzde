@@ -1,9 +1,20 @@
 # A NixOS VM test of the network modes, the home directory and the label
 # environment. The node "server" has a local address (192.168.1.2) and an
 # address that is not local (203.0.113.10, "the internet").
-{ module }:
+{
+  module,
+  # The OpenSnitch fork (overlays.opensnitch of flake.nix), for the sandbox
+  # with opensnitch.
+  opensnitchOverlay ? null,
+}:
 { pkgs, ... }:
 let
+  # A backend of the configuration (the interface of README.md): it writes
+  # its mode to /tmp/logged-backend.log and gives the plan to bwrap.
+  loggedBackend = pkgs.writeShellScriptBin "logged-backend" ''
+    echo "$1" >> /tmp/logged-backend.log
+    exec sandbox-backend-bwrap "$@"
+  '';
   # A command that prints the sandbox, the directory and the files in ~/work
   # that it sees.
   whereami = pkgs.writeShellScriptBin "whereami" ''
@@ -18,9 +29,13 @@ let
 in
 {
   name = "sandboxes";
+  node.pkgsReadOnly = false;
 
   nodes.server = {
-    networking.firewall.allowedTCPPorts = [ 80 ];
+    networking.firewall.allowedTCPPorts = [
+      80
+      1080
+    ];
     networking.interfaces.eth1.ipv4.addresses = [
       {
         address = "203.0.113.10";
@@ -30,6 +45,13 @@ in
     services.nginx = {
       enable = true;
       virtualHosts.default.locations."/".return = "200 ok";
+    };
+    # A SOCKS proxy for the sandbox with socksProxy.
+    systemd.services.microsocks = {
+      wantedBy = [ "multi-user.target" ];
+      after = [ "network-online.target" ];
+      wants = [ "network-online.target" ];
+      serviceConfig.ExecStart = "${pkgs.microsocks}/bin/microsocks -i 192.168.1.2 -p 1080";
     };
   };
 
@@ -43,17 +65,53 @@ in
     ];
     environment.systemPackages = [
       pkgs.curl
+      pkgs.microsocks
       pkgs.openssh
+      pkgs.procps
       pkgs.socat
+    ];
+    nixpkgs.overlays = pkgs.lib.optional (opensnitchOverlay != null) opensnitchOverlay;
+    # The daemon of a sandbox makes its nftables rules in a user namespace,
+    # where the kernel does not load modules.
+    boot.kernelModules = [
+      "nf_tables"
+      "nft_ct"
+      "nft_queue"
+      "nfnetlink_queue"
     ];
     users.users.alice = {
       isNormalUser = true;
       uid = 1000;
       linger = true;
     };
+    # A trusted user: the sandbox with `nix` must be untrusted all the same.
+    nix.settings.trusted-users = [ "alice" ];
     programs.sandboxes = {
       enable = true;
+      backends.logged = loggedBackend;
+      # The test selects the line of the menu with a variable.
+      menu.command = "${pkgs.gnugrep}/bin/grep -m1 \"$SANDBOX_TEST_PICK\"";
+      opensnitch.settings.DefaultAction = "allow";
       environments = {
+        ext.backend = "logged";
+        socks.socksProxy = "192.168.1.2:1080";
+        privacy.privacyFilter = true;
+        osn.opensnitch = {
+          enable = true;
+          rules.deny-inet = {
+            name = "deny-inet";
+            enabled = true;
+            action = "deny";
+            duration = "always";
+            created = "1970-01-01T00:00:00Z";
+            operator = {
+              type = "simple";
+              operand = "dest.ip";
+              sensitive = false;
+              data = "203.0.113.10";
+            };
+          };
+        };
         net = {
           color = "#008080";
           commands = { inherit whereami; };
@@ -68,6 +126,11 @@ in
         hostnet.shareHostNetwork = true;
         disposable.persistentHome = false;
         sharedtmp.sharedTmp = true;
+        # The store of the host, without a network.
+        withnix = {
+          nix = true;
+          disableNetworking = true;
+        };
         # The access options of sandboxed-agents.
         agents = {
           git = true;
@@ -125,6 +188,7 @@ in
         gnone = {
           backend = "gvisor";
           disableNetworking = true;
+          gui = false;
         };
         ghostnet = {
           backend = "gvisor";
@@ -143,6 +207,21 @@ in
     def sb(env, cmd, ok=True):
         line = f"su - alice -c 'SANDBOX_NO_SCOPE=1 sandbox run {env} -- sh -c \"{cmd}\"'"
         return client.succeed(line) if ok else client.fail(line)
+
+    with subtest("plans"):
+        # PATH of a sandbox: the bin directories of the packages, the last
+        # first, and then the PATH of the caller (not the PATH of the
+        # sandbox command).
+        import json
+        conf = json.loads(client.succeed("cat /etc/sandboxes/config.json"))
+        alice_path = client.succeed("su - alice -c 'echo $PATH'").strip()
+        for env in sorted(conf["environments"]):
+            plan = json.loads(client.succeed(f"su - alice -c 'sandbox __plan run {env} /T /S \"\" -- true'"))
+            want = ":".join(list(reversed(conf["environments"][env]["bin"])) + [alice_path])
+            assert plan["env"]["PATH"] == want, f"{env}: {plan['env']['PATH']} != {want}"
+        # A program with the terminal of the caller cannot put characters
+        # into its input.
+        client.succeed("test $(cat /proc/sys/dev/tty/legacy_tiocsti) = 0")
 
     lan = "curl -sf -m 5 http://192.168.1.2/"
     inet = "curl -sf -m 5 http://203.0.113.10/"
@@ -164,11 +243,13 @@ in
             sb(env, inet, inet_ok)
 
     with subtest("loopback of the host"):
-        # A service on 127.0.0.1 of the host, as a Gradle daemon.
+        # A service on 127.0.0.1 of the host, as a Gradle daemon. After the
+        # end of its input, socat waits -t seconds for the answer: gVisor
+        # can need more than the default 0.5 s.
         client.succeed("su - alice -c 'socat TCP-LISTEN:9000,bind=127.0.0.1,fork,reuseaddr SYSTEM:\"echo hi\" >/dev/null 2>&1 &'")
         client.wait_for_open_port(9000)
         for env, ok in [("hostnet", True), ("ghostnet", True), ("net", False), ("gnet", False)]:
-            sb(env, "socat -T 3 - TCP:127.0.0.1:9000 </dev/null | grep -q hi", ok)
+            sb(env, "socat -T 3 -t 3 - TCP:127.0.0.1:9000 </dev/null | grep -q hi", ok)
 
     with subtest("ping"):
         for env, host, ok in [
@@ -214,7 +295,12 @@ in
         # A sandbox without the options does not get the files.
         sb("net", "test ! -e ~/.gitconfig && test ! -e ~/.claude/new")
         assert sb("agents", "echo \\$FOO").strip() == "a=b"
-        sb("agents", "grep -q dangerously-skip-permissions \\$(command -v claude)")
+        # yolo: the claude first in PATH starts the next claude with
+        # --dangerously-skip-permissions.
+        bin = "/home/alice/.local/share/sandboxes/agents/home/bin"
+        client.succeed(f"mkdir -p {bin} && cat > {bin}/claude <<'EOF'\n#!/bin/sh\necho \"claude $@\"\nEOF\nchmod +x {bin}/claude && chown -R alice {bin}")
+        out = sb("agents", "PATH=\\$PATH:/home/alice/bin claude x").strip()
+        assert out == "claude --dangerously-skip-permissions x", out
 
     with subtest("commands"):
         client.succeed("su - alice -c 'mkdir -p ~/work/a ~/work/b && echo secret-notes > ~/notes'")
@@ -250,9 +336,30 @@ in
         out = client.succeed("su - alice -c 'cd ~/work && SANDBOX_NO_SCOPE=1 sandbox run --need-cwd slashed -- pwd'")
         assert out.strip() == "/home/alice/work", out
         assert sb("slashed", "cd ~/work/a && whereami-cwd").strip() == "slashed:/home/alice/work/a:a:slashed:"
+        # A $PWD with an empty segment names the same directory. With a ".."
+        # segment, the test takes the directory without links: ~/x is not
+        # below ~/work.
+        out = client.succeed("su - alice -c 'cd ~/work/a && PWD=/home/alice//work/a SANDBOX_NO_SCOPE=1 sandbox run --need-cwd agents -- realpath .'")
+        assert out.strip() == "/home/alice/work/a", out
+        out = client.fail("su - alice -c 'mkdir -p ~/x && cd ~/x && PWD=/home/alice/work/../x SANDBOX_NO_SCOPE=1 sandbox run --need-cwd agents -- true 2>&1'")
+        assert "does not have the current directory /home/alice/x" in out, out
+        out = sb("agents", "cd ~/work/a && PWD=/home/alice//work/a whereami-cwd").strip()
+        assert out.endswith(":a:nested:"), out
         # cwdOnly does not start when a path has the configuration of a program.
         out = sb("homeagent", "cd ~/work/a && whereami-cwd 2>&1", ok=False)
         assert "has the configuration /home/alice/.claude" in out, out
+
+    with subtest("nix daemon"):
+        # The Nix daemon trusts alice on the host, but not in the sandbox.
+        info = "nix --extra-experimental-features nix-command store info 2>&1"
+        assert "Trusted: 1" in client.succeed(f"su - alice -c '{info}'")
+        out = sb("withnix", info)
+        assert "Trusted: 0" in out, out
+        # A path that the sandbox adds is in the store of the host.
+        path = sb("withnix", "echo hi > f && nix-store --add f").strip()
+        assert client.succeed(f"cat {path}").strip() == "hi", path
+        # A sandbox without the option has no socket.
+        sb("net", "test ! -e /nix/var/nix/daemon-socket")
 
     with subtest("ssh"):
         # /etc/ssh/ssh_config of NixOS includes a file of /nix/store
@@ -342,8 +449,13 @@ in
             assert rc == 7, f"{env}: exit code {rc}"
             assert sc(env, "pwd").strip() == "/home/alice", env
             # The program has no capabilities and cannot get new privileges,
-            # as in a run of its own.
+            # as in a run of its own. (The /proc of gVisor has no SigIgn.)
             if env != "gnet":
+                # The program gets Ctrl-C and SIGPIPE: SIGINT (bit 2) and
+                # SIGPIPE (bit 13) are not ignored.
+                for f in [sc, sb]:
+                    ign = int(f(env, "grep SigIgn /proc/self/status").split()[1], 16)
+                    assert ign & 0x1002 == 0, f"{env}: SigIgn {ign:x}"
                 assert sc(env, "grep CapEff /proc/self/status").split()[1] == "0000000000000000", env
                 assert sc(env, "grep NoNewPrivs /proc/self/status").split()[1] == "1", env
                 # The mounts of the container stay read-only.
@@ -362,11 +474,162 @@ in
         client.succeed(run + "sandbox stop net'")
         client.wait_until_fails("pgrep -u alice -xf 'sleep 302'")
         assert not active("net")
+        # A configuration that gives less access than the running container
+        # has: the run stops. More access: the run only warns. `sandbox ps`
+        # shows the container, and that its configuration changed.
+        client.succeed("su - alice -c 'mkdir -p ~/work/a && touch ~/notes'")
+        jq = "${pkgs.jq}/bin/jq"
+        client.succeed(f"{jq} '.environments.agents.paths = [\"~/work\"]' /etc/sandboxes/config.json > /tmp/less.json")
+        client.succeed("mkdir -p /tmp/extra")
+        client.succeed(f"{jq} '.environments.agents.paths += [\"/tmp/extra\"]' /etc/sandboxes/config.json > /tmp/more.json")
+        client.succeed("chmod 644 /tmp/less.json /tmp/more.json")
+        client.succeed(run + "sandbox run agents -- sleep 303 >/dev/null 2>&1 &'")
+        client.wait_until_succeeds(run + "systemctl --user -q is-active sandbox@agents.service'")
+        out = client.fail(run + "SANDBOX_CONFIG=/tmp/less.json sandbox run agents -- true 2>&1'")
+        assert "has more access than its configuration gives now (/home/alice/notes)" in out, out
+        out = client.succeed(run + "SANDBOX_CONFIG=/tmp/more.json sandbox run agents -- true 2>&1'")
+        assert "started with different mounts (/tmp/extra)" in out, out
+        out = client.succeed(run + "sandbox ps'")
+        assert "[container]" in out and "stale" not in out, out
+        out = client.succeed(run + "SANDBOX_CONFIG=/tmp/less.json sandbox ps'")
+        assert "agents" in out and "stale" in out, out
+        client.succeed(run + "sandbox stop agents'")
+        assert not active("agents")
         # A terminal, and the exit code of a program with a terminal.
+        import re
         for env in ["net", "gnet"]:
+            # The program has a terminal of its own: it cannot change the
+            # terminal of the caller.
+            for prefix in [run, "su - alice -c 'SANDBOX_NO_SCOPE=1 "]:
+                out = client.succeed(prefix + f"timeout 60 script -qec \"sandbox run {env} -- stty -echo; stty -a\" /dev/null'")
+                assert re.search(r"(^|\s)echo(\s|$)", out) and not re.search(r"(^|\s)-echo(\s|$)", out), f"{env}: {out}"
             assert "is-tty" in client.succeed(run + f"timeout 60 script -qec \"sandbox run {env} -- sh -c \\\"test -t 0 && test -t 1 && echo is-tty\\\"\" /dev/null'"), env
             rc = client.execute(run + f"timeout 60 script -qec \"sandbox run {env} -- sh -c \\\"exit 7\\\"\" /dev/null'")[0]
             assert rc == 7, f"{env}: exit code {rc}"
+
+    with subtest("cli"):
+        names = client.succeed("su - alice -c 'sandbox list --names'").split()
+        assert sorted(names) == sorted(conf["environments"]), names
+        out = client.succeed("su - alice -c 'sandbox list'")
+        assert any(l.startswith("gnet ") and "#800080" in l and "gvisor" in l for l in out.splitlines()), out
+        out = client.succeed("su - alice -c 'sandbox show net'")
+        assert "backend: bwrap" in out and "network: private" in out and "--unshare-user" in out, out
+        out = client.succeed("su - alice -c 'sandbox backends'")
+        assert "sandbox-backend-bwrap" in out and "sandbox-backend-gvisor" in out and "logged-backend" in out, out
+        assert client.succeed("su - alice -c 'sandbox home net'").strip() == "/home/alice/.local/share/sandboxes/net/home"
+        assert client.succeed("su - alice -c 'SANDBOX_TEST_PICK=^gnone sandbox pick'").strip() == "gnone"
+        assert client.succeed("su - alice -c 'SANDBOX_TEST_PICK=^host sandbox pick --host'").strip() == "host"
+        # --gui: gnone has no gui, so the menu does not get it.
+        client.fail("su - alice -c 'SANDBOX_TEST_PICK=^gnone sandbox pick --gui'")
+
+    with subtest("external backend"):
+        # A backend of the configuration gets run, then start and exec.
+        client.succeed("rm -f /tmp/logged-backend.log")
+        assert sb("ext", "echo \\$SANDBOX_BACKEND").strip() == "logged"
+        sc("ext", "true")
+        client.wait_until_succeeds(f"! {run}systemctl --user -q is-active sandbox@ext.service'")
+        modes = client.succeed("cat /tmp/logged-backend.log").split()
+        assert modes == ["run", "start", "exec"], modes
+
+    with subtest("socks proxy"):
+        # All traffic goes through the proxy on the server: nginx sees the
+        # proxy, not the client.
+        server.wait_for_open_port(1080, "192.168.1.2")
+        for f in [sb, sc]:
+            f("socks", inet)
+            remote = server.succeed("tail -n 1 /var/log/nginx/access.log").split()[0]
+            assert remote == "203.0.113.10", remote
+        client.wait_until_succeeds(f"! {run}systemctl --user -q is-active sandbox@socks.service'")
+        # Without the proxy, no connection: there is no other way out. (The
+        # proxy host itself is reachable directly.)
+        server.systemctl("stop microsocks")
+        sb("socks", inet, ok=False)
+        server.systemctl("start microsocks")
+
+    with subtest("privacy filter"):
+        # The proxy on 127.0.0.1:1080 of the host.
+        client.succeed("su - alice -c 'microsocks -i 127.0.0.1 -p 1080 >/dev/null 2>&1 &'")
+        client.wait_for_open_port(1080)
+        sb("privacy", inet)
+        client.succeed("pkill -x microsocks")
+        sb("privacy", inet, ok=False)
+
+    with subtest("signals"):
+        # TERM to a run stops its program: in a scope (in the container), and
+        # without a scope (bwrap and gVisor, each in a network of its own).
+        client.succeed(run + "sandbox run net -- sleep 311 >/dev/null 2>&1 &'")
+        client.wait_until_succeeds("pgrep -u alice -xf 'sleep 311'")
+        front = client.succeed("pgrep -u alice -f 'sandbox run net -- sleep 311'").split()[0]
+        client.succeed(f"kill -TERM {front}")
+        client.wait_until_fails("pgrep -u alice -xf 'sleep 311'")
+        client.wait_until_succeeds(f"! {run}systemctl --user -q is-active sandbox@net.service'")
+        for env in ["net", "gnet"]:
+            client.succeed(f"su - alice -c 'SANDBOX_NO_SCOPE=1 sandbox run {env} -- sleep 312 >/dev/null 2>&1 &'")
+            front = client.wait_until_succeeds(f"pgrep -u alice -f 'sandbox run {env} -- sleep 312'").split()[0]
+            # The program of gVisor is in the Sentry of runsc, not a process
+            # of the host.
+            if env == "net":
+                client.wait_until_succeeds("pgrep -u alice -xf 'sleep 312'")
+            else:
+                client.wait_until_succeeds("pgrep -u alice -f 'runsc.*sandbox-gnet'")
+                client.sleep(2)
+            client.succeed(f"kill -TERM {front}")
+            client.wait_until_fails(f"pgrep -u alice -f 'sandbox run {env} -- sleep 312'")
+            if env == "net":
+                client.wait_until_fails("pgrep -u alice -xf 'sleep 312'")
+            else:
+                client.wait_until_fails("pgrep -u alice -f 'runsc.*sandbox-gnet'")
+
+    with subtest("concurrent first runs"):
+        # Two runs start the container at the same time: one container.
+        for _ in range(2):
+            client.succeed(run + "sandbox run lanonly -- sleep 313 >/dev/null 2>&1 &'")
+        client.wait_until_succeeds(run + "sandbox run lanonly -- sh -c \"test \\$(pgrep -cxf sleep.313) = 2\"'")
+        sc("lanonly", "pkill -xf sleep.313")
+        client.wait_until_succeeds(f"! {run}systemctl --user -q is-active sandbox@lanonly.service'")
+
+    with subtest("a container that stops"):
+        # When the container stops, the programs of its runs stop, and the
+        # next run starts a new container.
+        client.succeed(run + "sandbox run net -- sleep 314 >/dev/null 2>&1 &'")
+        client.wait_until_succeeds("pgrep -u alice -xf 'sleep 314'")
+        client.succeed(run + "systemctl --user kill --signal=KILL sandbox@net.service'")
+        client.wait_until_fails("pgrep -u alice -xf 'sleep 314'")
+        assert sc("net", "echo again").strip() == "again"
+
+    if ${if opensnitchOverlay != null then "True" else "False"}:
+        with subtest("opensnitch"):
+            # The daemon of the sandbox sees the connections of the sandbox:
+            # the rule of the sandbox denies 203.0.113.10, the default action
+            # allows the rest.
+            client.succeed(run + "sandbox run osn -- sleep 315 >/dev/null 2>&1 &'")
+            client.wait_until_succeeds(f"{run}systemctl --user -q is-active sandbox@osn.service'")
+            client.succeed("pgrep -u alice -f 'opensnitchd -config-file'")
+            sc("osn", lan)
+            sc("osn", inet, ok=False)
+            # The rule is a link into the store in the directory of the daemon.
+            client.succeed("test -L /home/alice/.local/share/sandboxes/osn/opensnitch/rules/deny-inet.json")
+            # The daemon starts again after it stops. (The package wraps the
+            # program: its process name is not opensnitchd.)
+            client.succeed("pkill -u alice -f 'opensnitchd -config-file'")
+            # The daemon removes its queue rules when it stops; the namespace
+            # process sees it and refuses all connections until the new
+            # daemon is ready.
+            client.wait_until_succeeds(run + "journalctl --user -u sandbox@osn.service | grep -q \"no connections until it is back\"'")
+            client.wait_until_succeeds("pgrep -u alice -f 'opensnitchd -config-file'")
+            client.wait_until_succeeds(run + f"sandbox run osn -- sh -c \"{lan}\"'")
+            sc("osn", inet, ok=False)
+            client.succeed(run + "sandbox stop osn'")
+            # A run without a scope has a daemon of its own and no restart:
+            # after its daemon stops, the run has no network. (The daemon
+            # needs about 6 s to stop.)
+            result = "/home/alice/.local/share/sandboxes/osn/home/result"
+            client.succeed(f"rm -f {result}")
+            client.succeed("su - alice -c 'SANDBOX_NO_SCOPE=1 sandbox run osn -- sh -c \"" + lan + " && echo before > ~/result; sleep 12; " + lan.replace("-m 5", "-m 3") + " && echo got >> ~/result || echo refused >> ~/result\" >/dev/null 2>&1 &'")
+            client.wait_until_succeeds(f"grep -q before {result}")
+            client.succeed("pkill -u alice -f 'opensnitchd -config-file'")
+            client.wait_until_succeeds(f"grep -qx 'refused\\|got' {result}", timeout=60)
+            assert client.succeed(f"cat {result}").split() == ["before", "refused"], client.succeed(f"cat {result}")
 
     with subtest("scopes"):
         client.succeed(run + "sandbox run net -- sleep 300 >/dev/null 2>&1 &'")

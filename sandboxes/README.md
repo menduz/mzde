@@ -140,8 +140,9 @@ sandbox run NAME -- CMD
              environment, the directory and the terminal of this run
 
 sandbox@NAME.service: the container of NAME, for all runs   (in sandbox-NAME.slice)
+ │  Type=notify: the scope of a run starts when the container is ready
  ├─ network "none" or "host": the backend starts at once
- ├─ network "private": unshare --user --net, slirp4netns, iptables,
+ ├─ network "private": a user and network namespace, slirp4netns, iptables,
  │   the OpenSnitch daemon (opensnitch.enable)
  └─ <backend> start plan.json
      ├─ bwrap:  bubblewrap, the kernel of the host
@@ -154,15 +155,28 @@ The frontend does all the work that does not change with the backend: it
 reads the configuration, finds the sockets of the host, selects the mounts and
 the environment, and makes the network namespace. A backend only isolates.
 
+`sandbox` is one program in Rust (`src/`), with no shell script at run time.
+The names `sandbox-init`, `sandbox-backend-bwrap` and
+`sandbox-backend-gvisor` are links to it. It starts other programs (bwrap,
+runsc, slirp4netns, iptables, systemd-run, ...) with their absolute paths
+from the build or the configuration, never from the PATH of the caller, and
+with one argument for each value (no shell). `cargo test` in this directory
+runs the unit tests.
+
 - All runs of a sandbox share the processes, `/tmp`, `$XDG_RUNTIME_DIR`, the
   home directory of a disposable sandbox, the X server, the session bus, the
   network and the OpenSnitch daemon. A sandbox has one of each.
 - The container gets the mounts and the environment of the run that starts
-  it (for example the Wayland socket and `SSH_AUTH_SOCK`). A run with
-  different mounts (after a change of the configuration) starts its program
-  with the mounts of the container, and `sandbox` tells it: `sandbox stop
-  NAME` stops the container and its programs, and the next run starts it
-  again.
+  it (for example the Wayland socket and `SSH_AUTH_SOCK`); the run writes
+  only the variables that the plan reads to
+  `$XDG_RUNTIME_DIR/sandboxes/NAME/caller.json`. A run whose configuration
+  gives the same or more access than the container (a new path, a new store
+  path after a rebuild, a different socket) starts its program with the
+  mounts of the container, and `sandbox` tells it. A run whose configuration
+  gives less access (a path that is not in `paths` now, rw that is now ro, a
+  different source) stops with an error. `sandbox stop NAME` stops the
+  container and its programs, and the next run starts it again. `sandbox ps`
+  marks a container that started with a different configuration.
 - A program of a run can stay after the command of the run (for example a
   server that the command starts). The scope of the run, and thus the
   container, stay until its last process stops. A run of bwrap stops its
@@ -172,6 +186,9 @@ the environment, and makes the network namespace. A backend only isolates.
   network, X server and session bus.
 - The service has the log of the container and of the OpenSnitch daemon:
   `journalctl --user -u sandbox@NAME`.
+- A run with a terminal shares the terminal of the caller. The module sets
+  `dev.tty.legacy_tiocsti = 0` (mkDefault), so that a program in a sandbox
+  cannot put characters into the input of that terminal.
 
 ## Options
 
@@ -220,7 +237,7 @@ Each sandbox in `programs.sandboxes.environments.<name>`:
 | `audio`                  | `false`   | PipeWire, PulseAudio, `/dev/snd` |
 | `dbus`                   | `private` | `private`: a session bus for the sandbox; `host`: the session bus of the host (no isolation); `none` |
 | `libvirt`                | `false`   | the libvirt sockets |
-| `nix`                    | `false`   | the socket of the Nix daemon |
+| `nix`                    | `false`   | the store of the host through the Nix daemon, as an untrusted client (`nix-daemon --force-untrusted`) |
 | `allowHome`              | `false`   | the real home directory, writable |
 | `internetAccess`         | `true`    | false: only local networks and `allowHosts` |
 | `lanAccess`              | `true`    | false: only the internet |
@@ -310,8 +327,16 @@ sandbox@web.service: the container of "web", one network namespace for all runs
   make in the GUI are files in `opensnitch.directory/rules`, and they stay.
 - The daemon runs as the user, as root of a user namespace. eBPF and audit
   need root on the host, so the daemon uses the `proc` process monitor.
-- The queue has no bypass: if the daemon stops, the sandbox has no new
-  connections until the daemon is back. The service starts the daemon again.
+- The queue has no bypass: a daemon that crashes leaves its queue rules,
+  and no connection goes out. A daemon that a program of the host stops
+  (SIGTERM) removes its queue rules: when the namespace process sees that
+  the daemon stopped, it puts a rule that rejects all connections first in
+  OUTPUT, starts the daemon again, and removes the rule when the queue rules
+  of the new daemon are in place. Between the end of the rules and that
+  moment, connections can go out. A program in the sandbox cannot stop the
+  daemon: the daemon is in a different user namespace and PID namespace. A
+  run without a scope has no restart: when its daemon stops, the run has no
+  network until it stops.
 - The configuration is the configuration of the daemon of the host, with the
   changes for a user namespace, and `programs.sandboxes.opensnitch.settings`.
   The command writes it again at each start, so a change from the GUI lasts
@@ -354,9 +379,12 @@ package must have `meta.mainProgram`), then use `backend = "<name>";`.
 | `bwrap`  | Linux namespaces                | the program uses the kernel of the host |
 | `gvisor` | a kernel in user space (runsc)  | no Wayland or X11 client can draw: gVisor cannot give its memory files (the window buffers) to the compositor, so use `gui = false` and a terminal on the host; no `/dev/dri`, `/dev/snd`, `/dev/kvm`; NVIDIA through `--nvproxy` (`SANDBOX_RUNSC_NVPROXY=1`); the program is uid 0 in gVisor (rootless runsc maps it to the user on the host) |
 
-`exec` of bwrap enters the namespaces and the root of the container with
-`nsenter`, without capabilities and with `no_new_privs`, as a program that
-bwrap starts. `exec` of gVisor is `runsc exec`.
+`exec` of bwrap enters the namespaces and the root of the container in one
+process: it checks the process of `.state/pid` with a pidfd and its start
+time, enters the parent user namespace, the other namespaces and then the
+user namespace of the container, and starts the program without
+capabilities, with `no_new_privs` and the parent death signal, as a program
+that bwrap starts. `exec` of gVisor is `runsc exec`.
 
 With a terminal (`tty` in the plan), the gVisor backend runs the command in
 `script` (util-linux). `script` makes a terminal in gVisor, so Ctrl-C and a
@@ -429,9 +457,23 @@ shell prompt. The kwm fork of menduz and `netgraph.sh` do this.
 
 ## Tests
 
-`nix build .#checks.x86_64-linux.sandboxes` (in mzde) runs a NixOS VM test of
-the network modes, the home directories, the commands, the label and the
-scopes, with both backends.
+- `cargo test` (in this directory) runs the tests of the program; the Nix
+  build of the package runs them too.
+  - unit tests (`src/`): the plan for each option and mode on a fake host
+    (`src/host.rs`, `src/plan_tests.rs`), the arguments of bwrap and runsc,
+    the firewall and the proxy of the network, the OpenSnitch configuration
+    and rules, the commands and cwdOnly, the menu, the comparison of the
+    mounts, the pty, the processes and the signals;
+  - integration tests (`tests/`): the program itself, with a test
+    configuration: the subcommands, the bwrap backend (run, start, exec),
+    `sandbox run`, the commands, `host`, `yolo` and sandbox-init. The tests
+    that need user namespaces do not run where bwrap cannot make a sandbox.
+- `nix build .#checks.x86_64-linux.sandboxes` (in mzde) runs a NixOS VM
+  test: the network modes, the SOCKS proxy and the privacy filter, the home
+  directories, the commands, the label, the scopes, the containers (shared
+  runs, refused and stale configurations, concurrent starts, a container
+  that stops), the signals, an external backend, OpenSnitch, and the menu,
+  with both backends.
 
 ## Limits of this prototype
 
@@ -442,7 +484,8 @@ scopes, with both backends.
   session bus of the host. `xdg-dbus-proxy` and the portals are the next step.
 - The mounts of a container do not change while it runs. A new
   configuration, or a run with a different Wayland socket, needs a new
-  container (`sandbox stop NAME`).
+  container (`sandbox stop NAME`). A smaller access applies to the running
+  programs only after `sandbox stop NAME`.
 - A program that a run of gVisor starts in the background is in gVisor,
   not in the scope of the run: it does not keep the container, and it stops
   when the container stops after the last run.

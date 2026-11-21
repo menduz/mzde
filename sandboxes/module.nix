@@ -16,7 +16,7 @@ let
 
   cfg = config.programs.sandboxes;
 
-  backendPackages = pkgs.callPackage ./backends { };
+  backendPackages = pkgs.callPackage ./backends { sandbox = cfg.package; };
 
   jsonFormat = pkgs.formats.json { };
 
@@ -132,15 +132,10 @@ let
     );
 
   # yolo: claude with --dangerously-skip-permissions. The wrapper is at the
-  # start of PATH, and it starts the next claude in PATH.
-  yoloClaude = pkgs.writeShellScriptBin "claude" ''
-    self=''${0%/*}
-    IFS=: read -ra dirs <<<"$PATH"
-    path=""
-    for d in "''${dirs[@]}"; do
-      [ "$d" = "$self" ] || path=''${path:+$path:}$d
-    done
-    PATH=$path exec claude --dangerously-skip-permissions "$@"
+  # start of PATH, and it starts the next claude in PATH (`sandbox __yolo`
+  # removes the directory of the wrapper from PATH).
+  yoloClaude = pkgs.runCommand "sandbox-yolo-claude" { nativeBuildInputs = [ pkgs.makeBinaryWrapper ]; } ''
+    makeWrapper ${lib.getExe cfg.package} $out/bin/claude --add-flags "__yolo $out/bin"
   '';
 
   # "KEY=VALUE" to { name = KEY; value = VALUE; }.
@@ -214,100 +209,14 @@ let
     }
   );
 
-  # The targets of `paths` of a sandbox, as shell words, with "~" as $HOME.
-  # A path without its empty segments, as `expand` of sandbox.sh makes it:
-  # "~/code/" is "~/code". The tests of the current directory compare the
-  # strings.
-  normPath =
-    p:
-    let
-      joined = lib.concatStringsSep "/" (lib.filter (s: s != "") (lib.splitString "/" p));
-    in
-    if lib.hasPrefix "/" p then "/${joined}" else joined;
-
-  # A path below $HOME as a shell word.
-  homeWord = p: ''"$HOME"/${lib.escapeShellArg p}'';
-
-  pathWords =
-    e:
-    map (
-      p:
-      let
-        target = normPath (lib.last (lib.splitString ":" (lib.removePrefix "rw:" (lib.removePrefix "ro:" p))));
-      in
-      if target == "~" then
-        ''"$HOME"''
-      else if lib.hasPrefix "~/" target then
-        homeWord (lib.removePrefix "~/" target)
-      else
-        lib.escapeShellArg target
-    ) e.paths;
-
-  # The start of the program of the command NAME (c) in the sandbox env (e is
-  # its configuration): a case of commandWrapper.
-  commandStart =
-    name: env: e: c:
-    let
-      program = lib.escapeShellArg "${lib.getBin c.package}/bin/${c.program}";
-    in
-    if !(c.cwdOnly || c.bwrapArgs != [ ]) then
-      ''
-        exec ${program} "$@"
-      ''
-    else
-      ''
-        args=()
-      ''
-      + lib.optionalString c.cwdOnly ''
-        # Hide the paths of the sandbox: an empty tmpfs on a directory, an
-        # empty file on a file. Then mount the current directory again. A path
-        # that has the configuration of a program (the options claude, codex,
-        # git, ...) would hide it: then the command does not start.
-        has_cwd=false
-        for d in ${lib.concatStringsSep " " (pathWords e)}; do
-          for c in ${lib.concatMapStringsSep " " (m: homeWord (lib.removeSuffix "/" m.path)) (configMounts e)}; do
-            if [[ $d == / || $c == "$d" || $c == "$d"/* ]]; then
-              echo "${name}: the path $d of the sandbox ${env} has the configuration $c, and cwdOnly would hide it." >&2
-              exit 1
-            fi
-          done
-          if [ -d "$d" ]; then
-            args+=(--tmpfs "$d")
-            if [[ $d == / || $PWD == "$d" || $PWD == "$d"/* ]]; then has_cwd=true; fi
-          elif [ -e "$d" ]; then
-            args+=(--ro-bind /dev/null "$d")
-          fi
-        done
-        if [ "$has_cwd" = true ]; then args+=(--bind "$PWD" "$PWD"); fi
-      ''
-      + ''
-        exec ${lib.getExe pkgs.bubblewrap} --dev-bind / / "''${args[@]}" \
-          ${lib.escapeShellArgs c.bwrapArgs} --die-with-parent --chdir "$PWD" \
-          -- ${program} "$@"
-      '';
-
-  # The command NAME. `uses` has an entry { env, e, c } for each sandbox env
-  # (e is its configuration) with the command c. In these sandboxes, the
-  # command starts the program. Elsewhere, it stops with an error.
+  # The command NAME: in the sandboxes with the command, `sandbox __command`
+  # starts the program; elsewhere, it stops with an error. The data of the
+  # commands is in config.json ("commands").
   commandWrapper =
-    name: uses:
-    let
-      envs = map (u: u.env) uses;
-      where =
-        if lib.length envs == 1 then
-          "the sandbox ${lib.head envs}"
-        else
-          "the sandboxes ${lib.concatStringsSep ", " envs}";
-    in
-    pkgs.writeShellScriptBin name ''
-      current=$(${lib.getExe cfg.package} current)
-      case $current in
-      ${lib.concatMapStrings (u: "${u.env})\n${commandStart name u.env u.e u.c};;\n") uses}*)
-        if [ "$current" = host ]; then here="on the host"; else here="in the sandbox $current"; fi
-        echo "${name}: ${name} runs only in ${where}, not $here. Start it in a terminal of a sandbox (sandbox run NAME)." >&2
-        exit 1
-        ;;
-      esac
+    name:
+    pkgs.runCommand "sandbox-command-${name}" { nativeBuildInputs = [ pkgs.makeBinaryWrapper ]; } ''
+      makeWrapper ${lib.getExe cfg.package} $out/bin/${lib.escapeShellArg name} \
+        --add-flags ${lib.escapeShellArg "__command ${name}"}
     '';
 
   # The uses of each command name, for commandWrapper.
@@ -545,7 +454,20 @@ let
         kvm = bool false "Mount /dev/kvm and /dev/vfio.";
         audio = bool false "Mount the PipeWire and PulseAudio sockets and /dev/snd.";
         libvirt = bool false "Mount the libvirt sockets.";
-        nix = bool false "Mount the socket of the Nix daemon.";
+        nix = bool false ''
+          Connect the Nix commands of the sandbox to the Nix daemon of the
+          host, so that the sandbox uses the store of the host and does not
+          download or build again what the host has. The daemon does not
+          trust the sandbox, also if the user is in `nix.settings.trusted-users`
+          (a trusted client can get root on the host): the user service
+          sandbox-nix-daemon@ forwards each connection with
+          `nix-daemon --stdio --force-untrusted`. Thus the sandbox cannot set
+          restricted settings, and it can use only the substituters of the
+          host and `trusted-substituters`.
+
+          The builds run outside the sandbox: a fixed-output derivation can
+          connect to all hosts that the Nix daemon can connect to.
+        '';
 
         allowHome = bool false ''
           Mount the real home directory, writable, in place of the home
@@ -718,16 +640,7 @@ let
         mountHomeCache = lib.mkIf (lib.elem "caches" config.mounts) true;
 
         packages = lib.mkMerge [
-          (lib.mapAttrsToList (
-            command: c:
-            commandWrapper command [
-              {
-                env = name;
-                e = config;
-                inherit c;
-              }
-            ]
-          ) config.commands)
+          (lib.mapAttrsToList (command: _: commandWrapper command) config.commands)
           # The wrapper is the last package, so it is the first in PATH.
           (lib.mkIf config.yolo (lib.mkAfter [ yoloClaude ]))
         ];
@@ -745,6 +658,8 @@ let
     );
 
   anyOpensnitch = lib.any (e: e.opensnitch.enable) (lib.attrValues cfg.environments);
+
+  anyNix = lib.any (e: e.nix) (lib.attrValues cfg.environments);
 
   # The configuration of the OpenSnitch daemons of the sandboxes: the
   # configuration of the daemon of the host, with the changes for a user
@@ -892,7 +807,21 @@ let
       menu = { inherit (cfg.menu) command markup; };
       host = { inherit (cfg.host) color; };
       backends = lib.mapAttrs (_: lib.getExe) cfg.backends;
-      init = lib.getExe cfg.initPackage;
+      init = lib.getExe' cfg.initPackage "sandbox-init";
+      systemd = "${config.systemd.package}";
+      # The programs that run only in sandboxes: name, then sandbox.
+      commands = lib.mapAttrs (
+        _: uses:
+        lib.listToAttrs (
+          map (
+            u:
+            lib.nameValuePair u.env {
+              program = "${lib.getBin u.c.package}/bin/${u.c.program}";
+              inherit (u.c) cwdOnly bwrapArgs;
+            }
+          ) uses
+        )
+      ) commandUses;
       sshConfig = if sshConfig == null then null else "${sshConfig}";
       inherit (cfg) homeCacheDirs commonHomeFolders;
       opensnitch =
@@ -920,20 +849,23 @@ in
 
     backends = mkOption {
       type = types.attrsOf types.package;
-      default = { inherit (backendPackages) bwrap gvisor; };
-      defaultText = lib.literalExpression "{ inherit (pkgs.callPackage ./backends { }) bwrap gvisor; }";
+      default = { };
       description = ''
         The backends. A backend is a command with the arguments
-        `run PLAN.json` and `show PLAN.json`. Refer to README.md for the
-        format of the plan.
+        `run|start|exec|show PLAN.json`. Refer to README.md for the format
+        of the plan. The module adds the built-in backends bwrap and gvisor;
+        a backend here is in addition to them, or replaces one of them.
       '';
     };
 
     initPackage = mkOption {
       type = types.package;
-      default = pkgs.callPackage ./init.nix { };
-      defaultText = lib.literalExpression "pkgs.callPackage ./init.nix { }";
-      description = "The first program in a sandbox: it starts the private session bus and X server.";
+      default = cfg.package;
+      defaultText = lib.literalExpression "config.programs.sandboxes.package";
+      description = ''
+        The package of `bin/sandbox-init`, the first program in a sandbox: it
+        starts the private session bus and X server.
+      '';
     };
 
     defaultBackend = mkOption {
@@ -1152,6 +1084,13 @@ in
   };
 
   config = lib.mkIf cfg.enable {
+    # The built-in backends. A definition of the configuration adds to them
+    # (the default of an option would be replaced).
+    programs.sandboxes.backends = {
+      bwrap = lib.mkDefault backendPackages.bwrap;
+      gvisor = lib.mkDefault backendPackages.gvisor;
+    };
+
     assertions = [
       {
         assertion = config.security.allowUserNamespaces;
@@ -1196,7 +1135,7 @@ in
       cfg.package
     ]
     ++ lib.attrValues cfg.backends
-    ++ lib.mapAttrsToList commandWrapper commandUses;
+    ++ lib.mapAttrsToList (name: _: commandWrapper name) commandUses;
 
     # A systemd user slice for each sandbox. `sandbox run` starts each run in a
     # scope below sandbox-<name>.slice. The name in the cgroup of a process
@@ -1231,6 +1170,10 @@ in
     ) (lib.filterAttrs (_: e: e.dconfSettings != { }) cfg.environments);
     environment.etc."sandboxes/config.json".source = configFile;
 
+    # A program in a sandbox that has the terminal of the caller cannot put
+    # characters into the input of that terminal (TIOCSTI).
+    boot.kernel.sysctl."dev.tty.legacy_tiocsti" = lib.mkDefault 0;
+
     # The container of a sandbox: the network namespace with slirp4netns, the
     # firewall and the OpenSnitch daemon, and the backend with the private X
     # server and session bus. Each run in a scope starts its program in the
@@ -1242,8 +1185,39 @@ in
       description = "Container of the sandbox %i";
       unitConfig.StopWhenUnneeded = true;
       serviceConfig = {
+        # The service tells systemd when the container can start programs,
+        # and systemd starts the scope of a run only then (After=).
+        Type = "notify";
+        NotifyAccess = "main";
         ExecStart = "${lib.getExe cfg.package} __container %i";
         Slice = "sandbox-%i.slice";
+      };
+    };
+
+    # The Nix daemon for the sandboxes with `nix`: a socket in the runtime
+    # directory of the user, mounted at /nix/var/nix/daemon-socket. For each
+    # connection, nix-daemon runs as the user, does not trust the client,
+    # and sends the operations to the Nix daemon of the host.
+    systemd.user.sockets.sandbox-nix-daemon = lib.mkIf anyNix {
+      description = "Nix daemon for the sandboxes (untrusted)";
+      wantedBy = [ "sockets.target" ];
+      socketConfig = {
+        ListenStream = "%t/sandbox-nix-daemon/socket";
+        Accept = true;
+        SocketMode = "0600";
+        DirectoryMode = "0700";
+      };
+    };
+    systemd.user.services."sandbox-nix-daemon@" = lib.mkIf anyNix {
+      description = "Nix daemon connection of a sandbox (untrusted)";
+      environment.NIX_REMOTE = "daemon";
+      serviceConfig = {
+        # --force-untrusted needs the experimental feature daemon-trust-override.
+        ExecStart = "${lib.getExe' config.nix.package "nix-daemon"} --extra-experimental-features daemon-trust-override --stdio --force-untrusted";
+        StandardInput = "socket";
+        StandardOutput = "socket";
+        # The socket is only for the protocol of Nix.
+        StandardError = "journal";
       };
     };
 
