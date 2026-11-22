@@ -29,6 +29,8 @@ pub const USAGE: &str = "Usage: sandbox COMMAND [ARGUMENTS]
   ps                      Show the programs that run in sandboxes, and the
                           containers.
   stop NAME               Stop all programs of the sandbox NAME.
+  logs NAME [ARGS...]     Show the log of the container of NAME (journalctl
+                          --user -u sandbox@NAME, with ARGS, for example -f).
   host [--] [CMD...]      Run CMD on the host, not in a sandbox, with the label
                           of the host (SANDBOX_NAME=host), in its own scope
                           below app.slice. The default is $SHELL.
@@ -70,6 +72,38 @@ fn current_from(name: Option<String>, pid1: Option<String>) -> String {
         return "host".into();
     }
     name
+}
+
+/// Stop with an error in a sandbox: a sandbox must not start, join or stop
+/// sandboxes (nested sandboxes are forbidden), and `host` there would give
+/// the label of the host to a program of the sandbox. Nested bwraps and
+/// namespaces stay possible: they can only remove access.
+///
+/// In a sandbox of bwrap, PID 1 is bwrap, and the programs of the sandbox
+/// cannot change that. In gVisor, SANDBOX_NAME tells it (`by_label`). The
+/// helpers of `run` on the host (the backends, __netns) get SANDBOX_NAME
+/// from `run`, and where PID 1 is not systemd (a Nix build) the label does
+/// not tell a sandbox: for them, `by_label` is false.
+///
+/// This is not a security boundary: a sandbox that goes around this check
+/// gets a sandbox in itself, with no more access than it has.
+pub fn refuse_in_sandbox(what: &str, by_label: bool) {
+    let label = util::env("SANDBOX_NAME").filter(|s| !s.is_empty() && s != "host");
+    if let Some(found) = in_sandbox_from(label.clone().filter(|_| by_label), std::fs::read_to_string("/proc/1/comm").ok()) {
+        // The label only names the sandbox in the message.
+        let name = label.unwrap_or(found);
+        die!("{what}: this process is in the sandbox {name}, and nested sandboxes are forbidden. Start it on the host.");
+    }
+}
+
+/// The sandbox of this process, if it is in a sandbox.
+fn in_sandbox_from(name: Option<String>, pid1: Option<String>) -> Option<String> {
+    let bwrap = pid1.as_deref().is_some_and(|c| c.trim_end() == "bwrap");
+    match current_from(name, pid1) {
+        n if n != "host" => Some(n),
+        _ if bwrap => Some("(unknown)".into()),
+        _ => None,
+    }
 }
 
 pub fn cmd_current() {
@@ -316,6 +350,18 @@ pub fn cmd_stop(args: &[String]) {
     std::process::exit(process::code(st));
 }
 
+/// Show the log of the container of a sandbox: journalctl with the
+/// arguments after NAME.
+pub fn cmd_logs(args: &[String]) -> ! {
+    let Some(name) = args.first() else {
+        die!("usage: sandbox logs NAME [JOURNALCTL-ARGS...]");
+    };
+    let config = load();
+    config.env(name).unwrap_or_else(|e| die!("{e}"));
+    let err = process::exec(&systemd::logs_args(&config, name, &args[1..]));
+    die!("{err}");
+}
+
 /// Run a program on the host with the label of the host. A shell prompt
 /// reads the label as for a sandbox. A window manager finds the host from
 /// the cgroup. The scope below app.slice takes the program out of the
@@ -384,6 +430,7 @@ pub fn cmd_show(args: &[String]) {
         name: &args[0],
         mode: Mode::Run,
         resolv: "$TMP/resolv.conf".into(),
+        wayland: Some("$TMP/wayland-0".into()),
         state: String::new(),
         command: vec!["CMD".into()],
     })
@@ -423,6 +470,23 @@ mod tests {
         // A program on the host can set SANDBOX_NAME: process 1 is systemd.
         assert_eq!(current_from(s("code"), s("systemd\n")), "host");
         assert_eq!(current_from(s("code"), None), "code");
+    }
+
+    #[test]
+    fn in_a_sandbox_by_the_label_or_by_process_1() {
+        let s = |v: &str| Some(v.to_string());
+        assert_eq!(in_sandbox_from(s("code"), s("bwrap\n")), s("code"));
+        // bwrap: a program can remove SANDBOX_NAME, or set it to "host",
+        // but PID 1 stays bwrap.
+        assert_eq!(in_sandbox_from(None, s("bwrap\n")), s("(unknown)"));
+        assert_eq!(in_sandbox_from(s("host"), s("bwrap\n")), s("(unknown)"));
+        // gVisor: process 1 is the first program.
+        assert_eq!(in_sandbox_from(s("code"), s("sh\n")), s("code"));
+        // The host: process 1 is systemd, also with SANDBOX_NAME.
+        assert_eq!(in_sandbox_from(s("code"), s("systemd\n")), None);
+        assert_eq!(in_sandbox_from(None, s("systemd\n")), None);
+        // The build of the package: process 1 is the builder.
+        assert_eq!(in_sandbox_from(None, s("bash\n")), None);
     }
 
     fn two() -> Config {

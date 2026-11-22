@@ -75,6 +75,7 @@ $ sandbox ps
 SANDBOX      PID      COMMAND
 work         41213    ghostty
 $ sandbox stop work
+$ sandbox logs work -f      # the log of the container: journalctl --user -u sandbox@work
 $ sandbox show web          # the plan and the backend command, not started
 $ sandbox pick --host       # a menu (rofi by default); prints the name
 $ sandbox pick --gui        # only the sandboxes with gui
@@ -167,7 +168,7 @@ runs the unit tests.
   home directory of a disposable sandbox, the X server, the session bus, the
   network and the OpenSnitch daemon. A sandbox has one of each.
 - The container gets the mounts and the environment of the run that starts
-  it (for example the Wayland socket and `SSH_AUTH_SOCK`); the run writes
+  it (for example `SSH_AUTH_SOCK`); the run writes
   only the variables that the plan reads to
   `$XDG_RUNTIME_DIR/sandboxes/NAME/caller.json`. A run whose configuration
   gives the same or more access than the container (a new path, a new store
@@ -185,13 +186,29 @@ runs the unit tests.
   gets a container of its own: `<backend> run plan.json`, with its own
   network, X server and session bus.
 - The service has the log of the container and of the OpenSnitch daemon:
-  `journalctl --user -u sandbox@NAME`.
+  `sandbox logs NAME` (`journalctl --user -u sandbox@NAME`; more arguments go
+  to journalctl, for example `sandbox logs NAME -f`).
+- The service sends a notification when the container starts and when it
+  stops (`programs.sandboxes.notifications`, `sandbox __notify`, src/notify.rs).
+  A stop after a signal (for example SIGKILL), the OOM killer or an error
+  gives a critical notification with the reason, from the variables of
+  ExecStopPost (SERVICE_RESULT, EXIT_STATUS).
 - A run with a terminal gets a terminal of its own, as `docker exec -t`:
   `sandbox` copies the bytes between it and the terminal of the caller, so a
   program in a sandbox cannot put characters into the input of the terminal
   of the caller. With bwrap, the terminal is on the devpts of the container,
   so `tty` (and `GPG_TTY`) finds its name. The module also sets
   `dev.tty.legacy_tiocsti = 0` (mkDefault).
+- Nested sandboxes are forbidden. In a sandbox, `run`, `host`, `stop` and
+  the backends (`run`, `start`, `exec`) stop with an error, also for the
+  same sandbox and without SANDBOX_NAME: in a sandbox of bwrap, PID 1 is
+  bwrap. `host` there would give the label of the host to a program of the
+  sandbox. `list`, `show`, `current` and the `commands` work. Nested bwraps
+  and namespaces stay possible (cwdOnly uses them): they can only remove
+  access. This check is not a security boundary: a program that goes around
+  it (a PID namespace of its own and no SANDBOX_NAME) gets a sandbox in its
+  sandbox, with no more access than its sandbox. The boundary between
+  sandboxes is what each sandbox can open.
 
 ## Options
 
@@ -235,12 +252,12 @@ Each sandbox in `programs.sandboxes.environments.<name>`:
 | `yolo`                   | `false`   | `claude` starts with `--dangerously-skip-permissions` |
 | `docker`                 | `false`   | the Docker socket (root on the host) |
 | `fuse`, `kvm`, `nvidia`  | `false`   | the devices |
-| `gui`                    | `true`    | the Wayland socket, `/dev/dri`, `/sys` |
+| `gui`                    | `true`    | a Wayland socket of a security context (no privileged protocols), `/dev/dri`, `/sys` |
 | `x11`                    | `private` | `private`: an X server for the sandbox (xwayland-satellite); `host`: the X sockets of the host (no isolation); `none` |
 | `audio`                  | `false`   | PipeWire, PulseAudio, `/dev/snd` |
 | `dbus`                   | `private` | `private`: a session bus for the sandbox; `host`: the session bus of the host (no isolation); `none` |
 | `libvirt`                | `false`   | the libvirt sockets |
-| `nix`                    | `false`   | the store of the host through the Nix daemon, as an untrusted client (`nix-daemon --force-untrusted --process-ops`) |
+| `nix`                    | `false`   | the store of the host through the Nix daemon, as an untrusted client (`nix-daemon --force-untrusted --process-ops`), and `~/.cache/nix` of the host, writable (the sandbox can write the eval cache of the host) |
 | `allowHome`              | `false`   | the real home directory, writable |
 | `internetAccess`         | `true`    | false: only local networks and `allowHosts` |
 | `lanAccess`              | `true`    | false: only the internet |
@@ -353,7 +370,7 @@ namespace, and it sends `Server.Name` to the GUI. The GUI must also be the
 fork, to show the nodes by name.
 
 ```console
-$ journalctl --user -u sandbox@web         # the log of the daemon
+$ sandbox logs web                         # the log of the daemon
 $ ls ~/.local/share/sandboxes/web/opensnitch/rules
 ```
 
@@ -483,14 +500,23 @@ shell prompt. The kwm fork of menduz and `netgraph.sh` do this.
 
 ## Limits of this prototype
 
-- The Wayland socket of the host is shared. A program in a sandbox can use all
-  Wayland protocols of the compositor (for example, screen capture). The
-  next step is `wp_security_context_v1`.
+- The Wayland socket of a sandbox is a socket of a security context
+  (`wp_security_context_v1`, src/wayland.rs), never the socket of the
+  compositor. The container (or a run without a scope) makes it when it
+  starts, and the compositor accepts connections on it until the container
+  stops. river does not give the privileged protocols to its clients: no
+  virtual keyboard or pointer, no capture of the screen, no data control of
+  the clipboard (a clipboard tool such as `wl-paste` needs the focus), no
+  window manager, layer shell or lock of the session. A compositor without
+  `wp_security_context_manager_v1` gives no Wayland socket to the
+  sandboxes. A restart of the compositor stops the security contexts: the
+  windows of the sandboxes stop, and `sandbox stop NAME` is necessary for
+  new windows. A container of an older version has the socket of the
+  compositor: a run refuses to join it.
 - No D-Bus filter to the host: `dbus` gives a private bus or all of the
   session bus of the host. `xdg-dbus-proxy` and the portals are the next step.
 - The mounts of a container do not change while it runs. A new
-  configuration, or a run with a different Wayland socket, needs a new
-  container (`sandbox stop NAME`). A smaller access applies to the running
+  configuration needs a new container (`sandbox stop NAME`). A smaller access applies to the running
   programs only after `sandbox stop NAME`.
 - A program that a run of gVisor starts in the background is in gVisor,
   not in the scope of the run: it does not keep the container, and it stops

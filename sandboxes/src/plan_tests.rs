@@ -7,12 +7,17 @@ use crate::testutil::{config, config_top};
 use serde_json::json;
 
 fn build_mode(c: &Config, h: &Fake, mode: Mode) -> Result<Built> {
+    build_wayland(c, h, mode, Some("/T/wayland-0"))
+}
+
+fn build_wayland(c: &Config, h: &Fake, mode: Mode, wayland: Option<&str>) -> Result<Built> {
     build_on(
         &Request {
             config: c,
             name: "s",
             mode,
             resolv: "/T/resolv.conf".into(),
+            wayland: wayland.map(String::from),
             state: "/S".into(),
             command: vec!["cmd".into(), "arg".into()],
         },
@@ -220,11 +225,13 @@ fn files_are_read_only_after_the_home() {
 // gui, X11 and D-Bus.
 
 #[test]
-fn gui_mounts_the_wayland_socket_as_wayland_0() {
+fn gui_mounts_the_socket_of_the_sandbox_as_wayland_0() {
     let mut h = Fake::new();
     h.set("WAYLAND_DISPLAY", "wayland-1").socket("/run/user/1000/wayland-1").file("/dev/dri").file("/sys");
     let b = build(&config(json!({"gui": true, "x11": "none"})), &h);
-    assert!(has(&b, "bind /run/user/1000/wayland-1 /run/user/1000/wayland-0 rw"));
+    // The socket of the security context, not the socket of the compositor.
+    assert!(has(&b, "bind /T/wayland-0 /run/user/1000/wayland-0 rw"), "{:?}", lines(&b));
+    assert!(!lines(&b).iter().any(|l| l.contains("wayland-1")), "{:?}", lines(&b));
     assert!(has(&b, "dev /dev/dri /dev/dri rw"));
     assert!(has(&b, "bind /sys /sys ro"));
     assert_eq!(env(&b, "WAYLAND_DISPLAY"), Some("wayland-0"));
@@ -232,25 +239,23 @@ fn gui_mounts_the_wayland_socket_as_wayland_0() {
 }
 
 #[test]
-fn gui_with_an_absolute_or_default_socket() {
+fn gui_without_a_security_context_gets_no_wayland_socket() {
     let mut h = Fake::new();
-    h.set("WAYLAND_DISPLAY", "/x/wl").socket("/x/wl");
-    let b = build(&config(json!({"gui": true, "x11": "none"})), &h);
-    assert!(has(&b, "bind /x/wl /run/user/1000/wayland-0 rw"));
-    let mut h = Fake::new();
-    h.socket("/run/user/1000/wayland-0");
-    let b = build(&config(json!({"gui": true, "x11": "none"})), &h);
-    assert!(has(&b, "bind /run/user/1000/wayland-0 /run/user/1000/wayland-0 rw"));
+    // The compositor has a socket, but the caller could not make the socket
+    // of the sandbox: the plan does not use the socket of the compositor.
+    h.set("WAYLAND_DISPLAY", "wayland-1").socket("/run/user/1000/wayland-1");
+    let b = build_wayland(&config(json!({"gui": true, "x11": "none"})), &h, Mode::Run, None).unwrap();
+    assert!(!lines(&b).iter().any(|l| l.contains("wayland")), "{:?}", lines(&b));
+    assert_eq!(env(&b, "WAYLAND_DISPLAY"), None);
+    assert_eq!(*h.warnings.borrow(), ["no Wayland socket for the sandbox"]);
 }
 
 #[test]
-fn gui_without_a_socket_warns() {
+fn no_gui_no_wayland_socket() {
     let mut h = Fake::new();
-    h.set("WAYLAND_DISPLAY", "wayland-1").file("/run/user/1000/wayland-1");
-    let b = build(&config(json!({"gui": true, "x11": "none"})), &h);
-    assert!(!lines(&b).iter().any(|l| l.contains("wayland")));
-    assert_eq!(env(&b, "WAYLAND_DISPLAY"), None);
-    assert_eq!(*h.warnings.borrow(), ["no Wayland socket at /run/user/1000/wayland-1"]);
+    h.set("WAYLAND_DISPLAY", "wayland-1").socket("/run/user/1000/wayland-1");
+    let b = build(&config(json!({"gui": false})), &h);
+    assert!(!lines(&b).iter().any(|l| l.contains("wayland")), "{:?}", lines(&b));
 }
 
 #[test]
@@ -521,12 +526,21 @@ fn audio_and_libvirt() {
 #[test]
 fn nix_gets_the_untrusted_daemon_socket() {
     let mut h = Fake::new();
-    h.file("/run/user/1000/sandbox-nix-daemon");
+    h.file("/run/user/1000/sandbox-nix-daemon").file("/home/a/.cache/nix");
     let b = build(&config(json!({"nix": true})), &h);
     assert!(has(&b, "bind /run/user/1000/sandbox-nix-daemon /nix/var/nix/daemon-socket rw"), "{:?}", lines(&b));
     assert_eq!(env(&b, "NIX_REMOTE"), Some("daemon"));
+    assert!(has(&b, "bind /home/a/.cache/nix /home/a/.cache/nix rw"));
     // Never the socket of the daemon of the host.
     assert!(!lines(&b).iter().any(|l| l.starts_with("bind /nix/var/nix/daemon-socket")));
+}
+
+#[test]
+fn no_nix_no_nix_cache() {
+    let mut h = Fake::new();
+    h.file("/home/a/.cache/nix");
+    let b = build(&config(json!({})), &h);
+    assert!(!lines(&b).iter().any(|l| l.contains(".cache/nix")));
 }
 
 #[test]
@@ -687,6 +701,7 @@ fn unknown_backend_and_sandbox() {
             name: "other",
             mode: Mode::Run,
             resolv: String::new(),
+            wayland: None,
             state: String::new(),
             command: vec![],
         },

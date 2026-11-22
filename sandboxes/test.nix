@@ -361,6 +361,18 @@ in
         # A sandbox without the option has no socket.
         sb("net", "test ! -e /nix/var/nix/daemon-socket")
 
+    with subtest("no nested sandboxes"):
+        # A sandbox cannot start a sandbox: not another one, not itself, and
+        # not without its label. host would give the label of the host.
+        for cmd in ["sandbox run agents -- true", "sandbox run net -- true", "env -u SANDBOX_NAME sandbox run agents -- true", "SANDBOX_NAME=host sandbox host -- true", "sandbox stop agents"]:
+            out = sb("net", f"{cmd} 2>&1", ok=False)
+            assert "nested sandboxes are forbidden" in out, f"{cmd}: {out}"
+        # No state of a nested sandbox in the home directory of the sandbox.
+        sb("net", "test ! -e ~/.local/share/sandboxes")
+        # The commands that start no sandbox work, and a nested bwrap too.
+        assert "agents" in sb("net", "sandbox list --names")
+        assert sb("net", "${pkgs.bubblewrap}/bin/bwrap --dev-bind / / -- echo nested").strip() == "nested"
+
     with subtest("ssh"):
         # /etc/ssh/ssh_config of NixOS includes a file of /nix/store
         # (systemd-ssh-proxy). ssh refuses an included file that is not owned

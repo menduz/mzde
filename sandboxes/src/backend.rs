@@ -42,6 +42,9 @@ pub fn main(backend: &str, args: &[String]) -> ! {
         std::process::exit(2);
     }
     let (mode, path) = (args[0].as_str(), args[1].as_str());
+    if matches!(mode, "run" | "start" | "exec") {
+        crate::cli::refuse_in_sandbox(&format!("{} {mode}", prog(backend)), false);
+    }
     let plan = Plan::read(path).unwrap_or_else(|e| fail!(backend, "{e}"));
     match (backend, mode) {
         ("bwrap", "run") => fail!(backend, "{}", process::exec(&bwrap_command(&plan, false))),

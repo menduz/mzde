@@ -1,5 +1,5 @@
-//! systemd: the scopes of the runs, the user units, and the notification of
-//! the container service. The programs come from the systemd package of the
+//! systemd: the scopes of the runs, the user units, the log and the
+//! notification of the container service. The programs come from the systemd package of the
 //! configuration (config.json "systemd"), so they agree with the systemd
 //! that runs, and the PATH of the caller does not select them.
 
@@ -52,6 +52,14 @@ fn scope_args(config: &Config, slice: &str, unit: &str, description: &str, prope
     args
 }
 
+/// The command line of journalctl for the log of the container service of
+/// the sandbox `name`, with the arguments `extra` (for example -f).
+pub fn logs_args(config: &Config, name: &str, extra: &[String]) -> Vec<String> {
+    let mut args = vec![program(config, "journalctl"), "--user".into(), format!("--unit=sandbox@{name}.service")];
+    args.extend(extra.iter().cloned());
+    args
+}
+
 /// Tell systemd that the service is ready (Type=notify). NOTIFY_SOCKET is a
 /// path, or an abstract name with "@".
 pub fn notify_ready(socket: Option<&str>) {
@@ -99,6 +107,15 @@ mod tests {
         let c = config_top(json!({}), json!({}));
         assert_eq!(super::scope_args(&c, "a", "b", "c", &[], &[])[0], "systemd-run");
         assert_eq!(super::systemctl(&c).get_program(), "systemctl");
+    }
+
+    #[test]
+    fn logs_command_line() {
+        let c = config_top(json!({}), json!({"systemd": "/nix/store/x-systemd"}));
+        assert_eq!(
+            super::logs_args(&c, "code", &["-f".into()]),
+            ["/nix/store/x-systemd/bin/journalctl", "--user", "--unit=sandbox@code.service", "-f"]
+        );
     }
 
     #[test]

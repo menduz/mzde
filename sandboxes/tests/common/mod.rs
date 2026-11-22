@@ -135,9 +135,20 @@ pub fn merge(base: &mut Value, patch: &Value) {
     }
 }
 
-/// Whether bwrap can make a sandbox here (user namespaces). A Nix build
-/// can run without them.
+/// Whether this process is in a sandbox of bwrap (PID 1 is bwrap). There,
+/// the program refuses to start sandboxes: nested sandboxes are forbidden.
+pub fn in_a_sandbox() -> bool {
+    fs::read_to_string("/proc/1/comm").is_ok_and(|c| c.trim_end() == "bwrap")
+}
+
+/// Whether bwrap can make a sandbox here (user namespaces) and the program
+/// starts sandboxes here (not in a sandbox). A Nix build can run without
+/// user namespaces.
 pub fn bwrap_works() -> bool {
+    if in_a_sandbox() {
+        eprintln!("this process is in a sandbox, and nested sandboxes are forbidden: the test does not run");
+        return false;
+    }
     let bwrap = option_env!("SANDBOX_TOOL_BWRAP").unwrap_or("bwrap");
     let ok = Command::new(bwrap)
         .args(["--unshare-user", "--unshare-pid", "--unshare-net", "--dev", "/dev", "--proc", "/proc", "--ro-bind", "/", "/", "true"])

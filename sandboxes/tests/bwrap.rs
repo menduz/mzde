@@ -252,6 +252,9 @@ fn exec_refuses_a_stopped_container_or_a_different_process() {
 
 #[test]
 fn exec_before_start() {
+    if in_a_sandbox() {
+        return;
+    }
     let d = Dir::new("bwrap-exec-none");
     let (rc, _, err) = exec(&d, "true");
     assert_eq!(rc, 1);

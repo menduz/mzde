@@ -166,6 +166,10 @@ fn a_cwd_only_command_sees_only_the_current_directory() {
 
 #[test]
 fn host_has_the_label_of_the_host() {
+    // In a sandbox, `host` stops with an error (tests/cli.rs).
+    if in_a_sandbox() {
+        return;
+    }
     let d = dir("host");
     let o = d
         .cmd(&["host", "--", "sh", "-c", "echo $SANDBOX_NAME $SANDBOX_COLOR ${SANDBOX_BACKEND:-none} ${SANDBOX__SCOPED:-none}"])

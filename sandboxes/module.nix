@@ -427,7 +427,13 @@ let
           root access to the host.
         '';
         fuse = bool false "Mount /dev/fuse.";
-        gui = bool true "Mount the Wayland socket, /dev/dri and /sys.";
+        gui = bool true ''
+          Give a Wayland socket, /dev/dri and /sys. The Wayland socket is a
+          socket of a security context (wp_security_context_v1), not the
+          socket of the compositor: the compositor does not give the
+          privileged protocols (virtual keyboard, screen capture, clipboard
+          data control) to the programs of the sandbox.
+        '';
         x11 = serviceMode ''
           The X server of the sandbox. Needs `gui`.
           - "private": an X server for the sandbox (xwayland-satellite), for
@@ -467,6 +473,13 @@ let
 
           The builds run outside the sandbox: a fixed-output derivation can
           connect to all hosts that the Nix daemon can connect to.
+
+          The sandbox also gets `~/.cache/nix` of the host, writable: the
+          tarball cache, the fetcher cache, the eval cache and the narinfo
+          cache. Without it, Nix (and devenv) download again the sources of
+          the flake inputs that are in the store. A program of the sandbox can
+          write the eval cache of the host, thus change what a `nix build` of a
+          flake on the host evaluates to (also `nixos-rebuild`).
         '';
 
         allowHome = bool false ''
@@ -1043,6 +1056,17 @@ in
       };
     };
 
+    notifications = mkOption {
+      type = types.bool;
+      default = true;
+      description = ''
+        Send a notification (notify-send, on the session bus of the host)
+        when the container of a sandbox starts and when it stops. A
+        container that stops with an error, or that a signal or the OOM
+        killer kills, gives a critical notification with the reason.
+      '';
+    };
+
     host.color = mkOption {
       type = types.strMatching "#[0-9a-fA-F]{6}";
       default = "#404040";
@@ -1191,6 +1215,13 @@ in
         NotifyAccess = "main";
         ExecStart = "${lib.getExe cfg.package} __container %i";
         Slice = "sandbox-%i.slice";
+      }
+      # ExecStartPost runs when the container is ready. ExecStopPost runs
+      # after each stop, also after a kill. "-": an error of the
+      # notification does not make the service fail.
+      // lib.optionalAttrs cfg.notifications {
+        ExecStartPost = "-${lib.getExe cfg.package} __notify started %i";
+        ExecStopPost = "-${lib.getExe cfg.package} __notify stopped %i";
       };
     };
 

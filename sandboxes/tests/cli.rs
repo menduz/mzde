@@ -1,6 +1,7 @@
 #![recursion_limit = "512"]
 //! The subcommands of `sandbox` that start no sandbox: list, home,
-//! backends, show, pick, __plan, the usage and the errors.
+//! backends, show, pick, __plan, the usage and the errors, and the refusal
+//! to start sandboxes in a sandbox.
 
 mod common;
 use common::*;
@@ -124,10 +125,13 @@ fn usage_and_errors() {
     let o = d.run(&["frobnicate"]);
     assert_eq!(o.status.code(), Some(2));
     assert!(stderr(&o).starts_with("Usage: sandbox COMMAND"));
-    let o = d.run(&["run"]);
-    assert_eq!(stderr(&o), "sandbox: usage: sandbox run [--need-cwd] NAME [--] [CMD...]\n");
-    let o = d.run(&["run", "nope", "--", "true"]);
-    assert_eq!(stderr(&o), "sandbox: no sandbox has the name 'nope'. Run 'sandbox list'.\n");
+    // In a sandbox, `run` stops before it reads its arguments.
+    if !in_a_sandbox() {
+        let o = d.run(&["run"]);
+        assert_eq!(stderr(&o), "sandbox: usage: sandbox run [--need-cwd] NAME [--] [CMD...]\n");
+        let o = d.run(&["run", "nope", "--", "true"]);
+        assert_eq!(stderr(&o), "sandbox: no sandbox has the name 'nope'. Run 'sandbox list'.\n");
+    }
     // A configuration with a wrong field: the name of the field.
     std::fs::write(d.path("config.json"), r#"{"menu": 1}"#).unwrap();
     let o = d.run(&["list", "--names"]);
@@ -151,4 +155,70 @@ fn current_needs_no_configuration() {
     // On a host with systemd as process 1, SANDBOX_NAME is not the sandbox.
     let want = if pid1.trim() == "systemd" { "host\n" } else { "work\n" };
     assert_eq!(stdout(&o), want);
+}
+
+/// `PROG ARGS` (PROG: the program or one of its links) with the
+/// environment of `d.cmd`, in a sandbox: here if this process is in one,
+/// else in a bwrap with a PID namespace (PID 1 is bwrap). None if bwrap
+/// cannot make a sandbox here.
+fn in_sandbox(d: &Dir, prog: &str, args: &[&str]) -> Option<std::process::Output> {
+    let inner = d.cmd(args);
+    let mut c = if in_a_sandbox() {
+        std::process::Command::new(prog)
+    } else {
+        let mut c = std::process::Command::new(option_env!("SANDBOX_TOOL_BWRAP").unwrap_or("bwrap"));
+        c.args(["--unshare-user", "--unshare-pid", "--dev", "/dev", "--proc", "/proc", "--ro-bind", "/", "/", "--", prog]);
+        c
+    };
+    c.args(args).current_dir(d.path("home")).stdin(std::process::Stdio::null());
+    for (k, v) in inner.get_envs() {
+        match v {
+            Some(v) => c.env(k, v),
+            None => c.env_remove(k),
+        };
+    }
+    if !in_a_sandbox() {
+        // bwrap cannot make a sandbox here (no user namespaces), or its
+        // /proc does not show its PID namespace (in a PID namespace of
+        // `unshare --mount-proc`): then the test cannot make a sandbox.
+        let probe = std::process::Command::new(c.get_program()).args(["--unshare-user", "--unshare-pid", "--dev", "/dev", "--proc", "/proc", "--ro-bind", "/", "/", "--", "cat", "/proc/1/comm"]).output().ok()?;
+        if stdout(&probe) != "bwrap\n" {
+            return None;
+        }
+    }
+    c.output().ok()
+}
+
+#[test]
+fn nested_sandboxes_are_forbidden() {
+    let d = dir();
+    let plan = d.path("plan.json");
+    std::fs::write(&plan, "{}").unwrap();
+    let refused = |prog: &str, args: &[&str], what: &str| -> bool {
+        let Some(o) = in_sandbox(&d, prog, args) else {
+            eprintln!("bwrap cannot make a sandbox here: the test does not run");
+            return false;
+        };
+        assert_eq!(o.status.code(), Some(1), "{args:?}: {}", stderr(&o));
+        let err = stderr(&o);
+        assert!(err.contains(&format!("{what}: this process is in the sandbox ")) && err.contains("nested sandboxes are forbidden"), "{args:?}: {err}");
+        true
+    };
+    // The commands that start, join or stop sandboxes, and host. The name
+    // of the sandbox is not important: also its own sandbox, or no sandbox
+    // of that name.
+    for args in [&["run", "work", "--", "true"][..], &["run", "nope"], &["host", "--", "true"], &["stop", "work"], &["__container", "work"], &["__netns", "/x"]] {
+        if !refused(BIN, args, &format!("sandbox {}", args[0])) {
+            return;
+        }
+    }
+    // The backends: run, start and exec.
+    let backend = d.path("bin/sandbox-backend-bwrap");
+    for mode in ["run", "start", "exec"] {
+        refused(&backend, &[mode, &plan], &format!("sandbox-backend-bwrap {mode}"));
+    }
+    // The commands that start no sandbox work in a sandbox.
+    let o = in_sandbox(&d, BIN, &["list", "--names"]).unwrap();
+    assert!(o.status.success(), "{}", stderr(&o));
+    assert_eq!(stdout(&o), "web\nwork\n");
 }

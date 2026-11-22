@@ -79,6 +79,10 @@ pub struct Request<'a> {
     pub mode: Mode,
     /// The resolv.conf of a private network.
     pub resolv: String,
+    /// The Wayland socket of the sandbox: the socket of its security
+    /// context (wayland.rs), not the socket of the compositor. None: the
+    /// caller could not make it, and the sandbox gets no Wayland socket.
+    pub wayland: Option<String>,
     /// The state directory of the container ("" for Mode::Run).
     pub state: String,
     /// The command after sandbox-init.
@@ -271,13 +275,16 @@ pub fn build_on(req: &Request, host: &dyn Host) -> Result<Built> {
 
     // The capabilities.
     if e.gui {
-        let wl = host.var_nonempty("WAYLAND_DISPLAY").unwrap_or_else(|| "wayland-0".into());
-        let wl = if wl.starts_with('/') { wl } else { format!("{run}/{wl}") };
-        if host.is_socket(&wl) {
-            b.bind_to(Bind::Rw, &wl, &format!("{run}/wayland-0"));
-            b.setenv("WAYLAND_DISPLAY", "wayland-0");
-        } else {
-            host.warn(&format!("no Wayland socket at {wl}"));
+        // Never the socket of the compositor: with it, a program of the
+        // sandbox gets the privileged globals (it can type into the windows
+        // of the host). The caller makes the socket of the security context
+        // before the plan (wayland.rs).
+        match &req.wayland {
+            Some(wl) => {
+                b.mnt(MountType::Bind, wl, &format!("{run}/wayland-0"), "rw");
+                b.setenv("WAYLAND_DISPLAY", "wayland-0");
+            }
+            None => host.warn("no Wayland socket for the sandbox"),
         }
         b.bind(Bind::Dev, "/dev/dri");
         b.bind(Bind::Ro, "/sys");
@@ -404,6 +411,12 @@ pub fn build_on(req: &Request, host: &dyn Host) -> Result<Built> {
             "/nix/var/nix/daemon-socket",
         );
         b.setenv("NIX_REMOTE", "daemon");
+        // The caches of Nix on the host: the tarball cache, the fetcher
+        // cache, the eval cache and the narinfo cache. Without them, Nix
+        // downloads again the sources of the flake inputs that are in the
+        // store. The sandbox can write the eval cache of the host. Refer to
+        // module.nix.
+        b.bind(Bind::Rw, &format!("{home}/.cache/nix"));
     }
 
     if e.mount_home_cache {

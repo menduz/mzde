@@ -33,6 +33,7 @@ use crate::process::{self, catch_signals, take_signals};
 use crate::pty::{self, Pty};
 use crate::systemd;
 use crate::util::{self, Result};
+use crate::wayland;
 use crate::{die, warn};
 
 /// The directory of the sandbox in the runtime directory of the user.
@@ -134,6 +135,26 @@ fn load_caller_env(dir: &str) {
 /// daemon) and starts the backend with sandbox-init, which starts the
 /// private X server and the session bus and stays. It tells systemd that it
 /// is ready when the backend can start programs in the container.
+/// The security context of Wayland of a sandbox with gui, and its socket
+/// `path` (refer to wayland.rs). None, with a warning, if the compositor
+/// does not give one: then the sandbox gets no Wayland socket, never the
+/// socket of the compositor.
+fn wayland_context(gui: bool, name: &str, path: &str) -> Option<(wayland::Context, String)> {
+    if !gui {
+        return None;
+    }
+    // SAFETY: getuid has no failure.
+    let runtime = util::env("XDG_RUNTIME_DIR").filter(|s| !s.is_empty()).unwrap_or_else(|| format!("/run/user/{}", unsafe { libc::getuid() }));
+    let compositor = wayland::compositor_socket(util::env("WAYLAND_DISPLAY"), &runtime);
+    match wayland::listen(&compositor, path, name, &format!("{name}-{}", std::process::id())) {
+        Ok(c) => Some((c, path.to_string())),
+        Err(e) => {
+            warn!("{e}");
+            None
+        }
+    }
+}
+
 pub fn cmd_container(args: &[String]) -> ! {
     if args.len() != 1 {
         die!("usage: sandbox __container NAME");
@@ -154,11 +175,14 @@ pub fn cmd_container(args: &[String]) -> ! {
     let _ = fs::write(format!("{dir}/config"), util::readlink_f(&config_path));
 
     let state = format!("{dir}/backend");
+    // The Wayland socket of the container: it stays while this process runs.
+    let wayland = wayland_context(e.gui, name, &format!("{dir}/wayland-0"));
     let built = plan::build(&Request {
         config: &config,
         name,
         mode: Mode::Container,
         resolv: format!("{dir}/resolv.conf"),
+        wayland: wayland.as_ref().map(|w| w.1.clone()),
         state: state.clone(),
         command: Vec::new(),
     })
@@ -453,16 +477,21 @@ pub fn cmd_run(args: &[String]) -> ! {
     // A run without a scope has no service: it gets a container of its own.
     let scoped = util::env("SANDBOX__SCOPED").filter(|v| !v.is_empty()).is_some();
     let cdir = container_dir(&name);
+    // A run without a scope makes the Wayland socket of its container. It
+    // stays while this process runs.
+    let wayland = if scoped { None } else { wayland_context(e.gui, &name, &format!("{tmp}/wayland-0")) };
     let req = if scoped {
         if !util::exists(&format!("{cdir}/ready")) {
             let _ = fs::remove_dir_all(&tmp);
-            die!("the container of {name} is not ready; refer to: journalctl --user -u sandbox@{name}");
+            die!("the container of {name} is not ready; refer to: sandbox logs {name}");
         }
         Request {
             config: &config,
             name: &name,
             mode: Mode::Join,
             resolv: format!("{cdir}/resolv.conf"),
+            // The socket of the container (cmd_container).
+            wayland: Some(format!("{cdir}/wayland-0")).filter(|p| util::is_socket(p)),
             state: format!("{cdir}/backend"),
             command: args.clone(),
         }
@@ -473,6 +502,7 @@ pub fn cmd_run(args: &[String]) -> ! {
             name: &name,
             mode: Mode::Run,
             resolv: format!("{tmp}/resolv.conf"),
+            wayland: wayland.as_ref().map(|w| w.1.clone()),
             state: String::new(),
             command: args.clone(),
         }
@@ -575,8 +605,22 @@ fn run_joined(name: &str, cdir: &str, plan: &Plan, plan_path: &str, term: Option
             d.other.join(", ")
         );
     }
+    if let Some(src) = other_wayland(&container, cdir) {
+        return Err(format!(
+            "the container of {name} has the Wayland socket {src}, not the socket of its security context: it started before the sandboxes had security contexts. 'sandbox stop {name}' stops it and its programs; the next run starts it again."
+        ));
+    }
     let ns = netns_fds(cdir)?;
     exec_joined(backend.trim_end(), plan_path, ns, term)
+}
+
+/// The source of the Wayland socket of a container, if it is not the socket
+/// of the security context of the container (`cdir`/wayland-0): a
+/// container of an older version has the socket of the compositor. compare
+/// only warns for a different socket.
+fn other_wayland(container: &Plan, cdir: &str) -> Option<String> {
+    let own = format!("{cdir}/wayland-0");
+    container.mounts.iter().find(|m| m.target.ends_with("/wayland-0") && m.source != own).map(|m| m.source.clone())
 }
 
 /// A new directory PREFIX.XXXXXX with the mode 0700.
@@ -624,6 +668,15 @@ mod tests {
             target: dst.into(),
             mode: mode.into(),
         }
+    }
+
+    #[test]
+    fn the_wayland_socket_of_the_compositor_in_a_container() {
+        let own = plan(vec![bind("/run/user/1000/sandbox-x/wayland-0", "/run/user/1000/wayland-0", "rw")]);
+        assert_eq!(other_wayland(&own, "/run/user/1000/sandbox-x"), None);
+        let old = plan(vec![bind("/run/user/1000/wayland-1", "/run/user/1000/wayland-0", "rw")]);
+        assert_eq!(other_wayland(&old, "/run/user/1000/sandbox-x").as_deref(), Some("/run/user/1000/wayland-1"));
+        assert_eq!(other_wayland(&plan(vec![]), "/run/user/1000/sandbox-x"), None);
     }
 
     #[test]

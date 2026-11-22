@@ -118,6 +118,17 @@
           kwim-apply = pkgs.callPackage ./tests/kwim-apply.nix {
             inherit (p) river kwm kwim;
           };
+          # The build of the sandbox command with the tests of its Wayland
+          # socket (sandboxes/tests/wayland.rs): a headless river of the fork
+          # does not give the privileged globals to a sandbox, and the X
+          # server of a sandbox works on that socket.
+          sandbox-wayland = (pkgs.callPackage ./sandboxes/package.nix { }).overrideAttrs (o: {
+            env = o.env // {
+              SANDBOX_TEST_RIVER = nixpkgs.lib.getExe' p.river "river";
+              SANDBOX_TEST_WAYLAND_INFO = nixpkgs.lib.getExe' pkgs.wayland-utils "wayland-info";
+              SANDBOX_TEST_XDPYINFO = nixpkgs.lib.getExe pkgs.xdpyinfo;
+            };
+          });
           # The network modes, the home directory, the commands and the
           # labels of the sandboxes, with bubblewrap and gVisor.
           sandboxes = pkgs.testers.runNixOSTest (
