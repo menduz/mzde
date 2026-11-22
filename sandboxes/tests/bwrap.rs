@@ -176,6 +176,32 @@ fn exec_without_a_terminal_is_a_new_session() {
 }
 
 #[test]
+fn exec_with_a_terminal_gives_a_terminal_of_the_container() {
+    if !bwrap_works() {
+        return;
+    }
+    let d = Dir::new("bwrap-exec-tty");
+    let _c = start(&d);
+    let mut plan = plan(&d, &["sh", "-c", "tty; [ -e \"$(tty)\" ] && echo has-node; read -r pid comm state ppid pgrp sid rest < /proc/self/stat; [ \"$sid\" = \"$pid\" ] && echo leader; read l; echo got:$l; exit 3"]);
+    plan["tty"] = json!(true);
+    let p = write(&d, "exec.json", &plan);
+    // The terminal of the caller is not a terminal here (a pipe): the
+    // program gets a terminal all the same, and this process the bytes.
+    let mut child = backend(&d, "exec", &p).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
+    {
+        use std::io::Write;
+        child.stdin.take().unwrap().write_all(b"hello\n").unwrap();
+    }
+    let o = child.wait_with_output().unwrap();
+    let out = stdout(&o);
+    assert_eq!(o.status.code(), Some(3), "{out}{}", stderr(&o));
+    // ttyname() finds the terminal in the devpts of the container. The
+    // terminal echoes the input, maybe before this line.
+    assert!(out.lines().any(|l| l.starts_with("/dev/pts/")), "{out}");
+    assert!(out.contains("has-node") && out.contains("leader") && out.contains("got:hello"), "{out}");
+}
+
+#[test]
 fn exec_gives_term_to_the_program() {
     if !bwrap_works() {
         return;

@@ -18,6 +18,7 @@ use std::process::{Command, Stdio};
 
 use crate::plan::{MountType, Plan};
 use crate::process::{self, catch_signals, take_signals};
+use crate::pty;
 use crate::run::{mktemp_dir, open_ns};
 use crate::tools;
 use crate::util::{self, Result};
@@ -209,9 +210,10 @@ fn setns(fd: &OwnedFd, kind: libc::c_int, what: &str) -> Result<()> {
 }
 
 /// exec: start the command of the plan in the container that `start` made
-/// for the same state directory. The program gets the environment, the
-/// directory and the terminal of the plan, and the namespaces and the root
-/// of the container.
+/// for the same state directory. The program gets the environment and the
+/// directory of the plan, and the namespaces and the root of the container.
+/// With a terminal, the program gets a new terminal of the container, as
+/// `docker exec -t` (refer to the end of this function).
 ///
 /// With --dev, bwrap makes a second user namespace in the first one, and
 /// the first one has the other namespaces. This process enters the parent
@@ -267,9 +269,19 @@ fn bwrap_exec(p: &Plan) -> ! {
     enter().unwrap_or_else(|e| fail!("bwrap", "{e}"));
     drop((user, parent, others, net, mnt, root, pidfd));
 
-    // With a terminal, the program gets the signals of the terminal itself.
-    // Without one, it is in a new session, and this process gives it the
-    // signals.
+    // The terminal of the caller is on a devpts of the host, and the
+    // container has a devpts of its own (--dev): in the container, ttyname()
+    // does not find a name for the terminal of the caller (tty and GPG_TTY
+    // fail). Thus, with a terminal, this process opens a terminal on the
+    // /dev/ptmx of the container, after the chroot. The program gets it as
+    // its controlling terminal in a new session, and this process copies the
+    // bytes between the two terminals (refer to pty.rs).
+    let term = p.tty.then(|| pty::open().unwrap_or_else(|e| fail!("bwrap", "a terminal in the container: {e}")));
+    let slave = term.as_ref().map(|t| t.slave.as_raw_fd());
+
+    // The program is in a new session: this process gives it the signals.
+    // With a terminal, Ctrl-C comes as a byte, and the terminal of the
+    // container gives the signal to the program.
     // The child sets the default handlers again before exec.
     catch_signals(&[libc::SIGINT, libc::SIGQUIT, libc::SIGTERM, libc::SIGHUP]);
     let env: Vec<(String, String)> = p.env.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
@@ -287,8 +299,16 @@ fn bwrap_exec(p: &Plan) -> ! {
             // visible (getppid is 0), so there is no test of the parent.
             libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL, 0, 0, 0);
             libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0);
-            if !p.tty {
-                libc::setsid();
+            match slave {
+                Some(fd) => {
+                    if let Err(e) = pty::attach(fd) {
+                        eprintln!("{}: the terminal of the container: {e}", prog("bwrap"));
+                        libc::_exit(1);
+                    }
+                }
+                None => {
+                    libc::setsid();
+                }
             }
             if libc::chdir(cwd.as_ptr()) != 0 {
                 eprintln!("{}: {}: {}", prog("bwrap"), p.cwd, std::io::Error::last_os_error());
@@ -300,13 +320,10 @@ fn bwrap_exec(p: &Plan) -> ! {
         // SAFETY: exit the child without the handlers of the parent.
         unsafe { libc::_exit(127) };
     }
-    std::process::exit(process::wait_child(child, &mut |s| {
-        // With a terminal, the program gets SIGINT and SIGQUIT from the
-        // terminal itself.
-        if !(p.tty && (s == libc::SIGINT || s == libc::SIGQUIT)) {
-            process::kill(child, s);
-        }
-    }));
+    match term {
+        Some(t) => std::process::exit(pty::proxy(t, child)),
+        None => std::process::exit(process::wait_child(child, &mut |s| process::kill(child, s))),
+    }
 }
 
 /// The gVisor backend: runsc, with an OCI bundle from the plan.

@@ -461,7 +461,7 @@ let
           trust the sandbox, also if the user is in `nix.settings.trusted-users`
           (a trusted client can get root on the host): the user service
           sandbox-nix-daemon@ forwards each connection with
-          `nix-daemon --stdio --force-untrusted`. Thus the sandbox cannot set
+          `nix-daemon --stdio --force-untrusted --process-ops`. Thus the sandbox cannot set
           restricted settings, and it can use only the substituters of the
           host and `trusted-substituters`.
 
@@ -1213,7 +1213,13 @@ in
       environment.NIX_REMOTE = "daemon";
       serviceConfig = {
         # --force-untrusted needs the experimental feature daemon-trust-override.
-        ExecStart = "${lib.getExe' config.nix.package "nix-daemon"} --extra-experimental-features daemon-trust-override --stdio --force-untrusted";
+        # Also --process-ops is necessary (it needs mounted-ssh-store): without
+        # it, nix-daemon --stdio with a daemon store does not process the
+        # operations, also with --force-untrusted. It then forwards the bytes
+        # with splice(), which fails from a socket to a socket (EINVAL), thus
+        # each connection stops. If the forward worked, the daemon of the
+        # host would trust the client, because the user is in trusted-users.
+        ExecStart = "${lib.getExe' config.nix.package "nix-daemon"} --extra-experimental-features 'daemon-trust-override mounted-ssh-store' --stdio --force-untrusted --process-ops";
         StandardInput = "socket";
         StandardOutput = "socket";
         # The socket is only for the protocol of Nix.

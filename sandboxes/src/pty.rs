@@ -74,14 +74,32 @@ pub fn spawn(cmd: &mut Command, pty: &Pty, before: impl Fn() -> std::io::Result<
     unsafe {
         cmd.pre_exec(move || {
             before()?;
-            if libc::setsid() < 0 || libc::ioctl(0, libc::TIOCSCTTY, 0) != 0 {
-                return Err(std::io::Error::last_os_error());
-            }
-            Ok(())
+            attach(0)
         });
     }
     let child = cmd.spawn().map_err(|e| format!("{:?}: {e}", cmd.get_program()))?;
     Ok(child.id() as libc::pid_t)
+}
+
+/// In a child after fork: a new session with the terminal `slave` as its
+/// controlling terminal and as its standard input, output and error.
+///
+/// # Safety
+///
+/// The function calls only system calls, as necessary after fork.
+pub unsafe fn attach(slave: RawFd) -> std::io::Result<()> {
+    // SAFETY: system calls with a valid descriptor.
+    unsafe {
+        if libc::setsid() < 0 || libc::ioctl(slave, libc::TIOCSCTTY, 0) != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        for fd in 0..3 {
+            if fd != slave && libc::dup2(slave, fd) < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Restores the settings of the terminal of the caller.

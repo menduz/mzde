@@ -186,9 +186,12 @@ runs the unit tests.
   network, X server and session bus.
 - The service has the log of the container and of the OpenSnitch daemon:
   `journalctl --user -u sandbox@NAME`.
-- A run with a terminal shares the terminal of the caller. The module sets
-  `dev.tty.legacy_tiocsti = 0` (mkDefault), so that a program in a sandbox
-  cannot put characters into the input of that terminal.
+- A run with a terminal gets a terminal of its own, as `docker exec -t`:
+  `sandbox` copies the bytes between it and the terminal of the caller, so a
+  program in a sandbox cannot put characters into the input of the terminal
+  of the caller. With bwrap, the terminal is on the devpts of the container,
+  so `tty` (and `GPG_TTY`) finds its name. The module also sets
+  `dev.tty.legacy_tiocsti = 0` (mkDefault).
 
 ## Options
 
@@ -237,7 +240,7 @@ Each sandbox in `programs.sandboxes.environments.<name>`:
 | `audio`                  | `false`   | PipeWire, PulseAudio, `/dev/snd` |
 | `dbus`                   | `private` | `private`: a session bus for the sandbox; `host`: the session bus of the host (no isolation); `none` |
 | `libvirt`                | `false`   | the libvirt sockets |
-| `nix`                    | `false`   | the store of the host through the Nix daemon, as an untrusted client (`nix-daemon --force-untrusted`) |
+| `nix`                    | `false`   | the store of the host through the Nix daemon, as an untrusted client (`nix-daemon --force-untrusted --process-ops`) |
 | `allowHome`              | `false`   | the real home directory, writable |
 | `internetAccess`         | `true`    | false: only local networks and `allowHosts` |
 | `lanAccess`              | `true`    | false: only the internet |
@@ -384,7 +387,10 @@ process: it checks the process of `.state/pid` with a pidfd and its start
 time, enters the parent user namespace, the other namespaces and then the
 user namespace of the container, and starts the program without
 capabilities, with `no_new_privs` and the parent death signal, as a program
-that bwrap starts. `exec` of gVisor is `runsc exec`.
+that bwrap starts. With a terminal, it opens a terminal on the `/dev/ptmx` of
+the container (the container has a devpts of its own, and the terminal of the
+caller has no name there), and copies the bytes between the two terminals.
+`exec` of gVisor is `runsc exec`.
 
 With a terminal (`tty` in the plan), the gVisor backend runs the command in
 `script` (util-linux). `script` makes a terminal in gVisor, so Ctrl-C and a
