@@ -456,6 +456,19 @@ let
           - "none": no session bus.
           true is "host" and false is "none".
         '';
+        notifications = bool true ''
+          Show the notifications of the programs of the sandbox with the
+          notification server of the host (dunst), with the name of the
+          sandbox before the summary and the border in the color of the
+          sandbox. Needs `dbus = "private"`. The private bus starts
+          `sandbox __notify_bridge` for org.freedesktop.Notifications, never
+          the notification server of the host in the sandbox; on the host,
+          the container checks each notification (no paths as icons, only
+          some hints, no actions: a click only closes the notification, a
+          rate limit) and lets the sandbox replace or close only its own
+          notifications. false: the programs get an error for each
+          notification.
+        '';
         nvidia = bool false "Mount the NVIDIA devices.";
         kvm = bool false "Mount /dev/kvm and /dev/vfio.";
         audio = bool false "Mount the PipeWire and PulseAudio sockets and /dev/snd.";
@@ -768,6 +781,7 @@ let
       gui
       x11
       dbus
+      notifications
       nvidia
       kvm
       audio

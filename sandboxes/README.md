@@ -185,6 +185,25 @@ runs the unit tests.
 - A run without a scope (`SANDBOX_NO_SCOPE=1`, or no systemd user manager)
   gets a container of its own: `<backend> run plan.json`, with its own
   network, X server and session bus.
+- The notifications of a sandbox with a private bus go to the notification
+  server of the host (`notifications`, default true). The private bus has a
+  service file of `org.freedesktop.Notifications` before the files of the
+  system, so it starts `sandbox __notify_bridge` (src/notify_bridge.rs) and
+  never a dunst of the sandbox. The bridge sends each notification on a
+  socket of the container to `sandbox __notify_host` (src/notify_host.rs),
+  which the container starts on the host. The host side does not trust
+  the sandbox: the summary starts with `NAME: `, the app name is
+  `NAME: app`, the border has the color of the sandbox (`frcolor`), an icon
+  is only a name of the icon theme, only urgency, category, transient,
+  resident, value and image-data go to the host, the notifications have no
+  actions (a click only closes them; the sandbox gets no ActionInvoked), a
+  sandbox can replace or close only its own notifications, at the unique
+  name of the server that gave the ID (after a restart of dunst the bus
+  refuses the call; it never reaches the new dunst), it gets
+  NotificationClosed only for its notifications and only from that server,
+  and it can send 20 notifications at once, then 5 each second. src/dbus.rs is the
+  D-Bus client of both (the wire protocol, no libdbus). A run without a
+  container (`SANDBOX_NO_SCOPE`) has no notifications.
 - The service has the log of the container and of the OpenSnitch daemon:
   `sandbox logs NAME` (`journalctl --user -u sandbox@NAME`; more arguments go
   to journalctl, for example `sandbox logs NAME -f`).
@@ -256,6 +275,7 @@ Each sandbox in `programs.sandboxes.environments.<name>`:
 | `x11`                    | `private` | `private`: an X server for the sandbox (xwayland-satellite); `host`: the X sockets of the host (no isolation); `none` |
 | `audio`                  | `false`   | PipeWire, PulseAudio, `/dev/snd` |
 | `dbus`                   | `private` | `private`: a session bus for the sandbox; `host`: the session bus of the host (no isolation); `none` |
+| `notifications`          | `true`    | with a private bus: the notifications go to the notification server of the host, with the name and the color of the sandbox |
 | `libvirt`                | `false`   | the libvirt sockets |
 | `nix`                    | `false`   | the store of the host through the Nix daemon, as an untrusted client (`nix-daemon --force-untrusted --process-ops`), and `~/.cache/nix` of the host, writable (the sandbox can write the eval cache of the host) |
 | `allowHome`              | `false`   | the real home directory, writable |
@@ -514,7 +534,9 @@ shell prompt. The kwm fork of menduz and `netgraph.sh` do this.
   new windows. A container of an older version has the socket of the
   compositor: a run refuses to join it.
 - No D-Bus filter to the host: `dbus` gives a private bus or all of the
-  session bus of the host. `xdg-dbus-proxy` and the portals are the next step.
+  session bus of the host. Only the notifications of a private bus go to
+  the host (`notifications`). `xdg-dbus-proxy` and the portals are the next
+  step.
 - The mounts of a container do not change while it runs. A new
   configuration needs a new container (`sandbox stop NAME`). A smaller access applies to the running
   programs only after `sandbox stop NAME`.

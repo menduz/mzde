@@ -86,6 +86,9 @@ pub struct Env {
     pub gui: bool,
     pub x11: Service,
     pub dbus: Service,
+    /// Forward the notifications of the private bus to the host
+    /// (notify_host.rs).
+    pub notifications: bool,
     pub nvidia: bool,
     pub kvm: bool,
     pub audio: bool,

@@ -3,6 +3,8 @@
 //! command.
 //!
 //!   SANDBOX_INIT_DBUS=1          a private session bus
+//!   SANDBOX_INIT_NOTIFY=PATH     the socket of the notifications of the
+//!                                host (notify_bridge.rs)
 //!   SANDBOX_INIT_X11=1           a private X server (xwayland-satellite)
 //!   SANDBOX_INIT_X11_DISPLAY=N   the first display number to try
 //!   SANDBOX_INIT_HOLD=1          the first process of the container of a
@@ -62,6 +64,41 @@ fn free_display(start: u32, taken: &dyn Fn(u32) -> bool) -> u32 {
     n
 }
 
+/// The configuration of the private bus and its service file of
+/// org.freedesktop.Notifications. The service directory of the sandbox is
+/// before the directories of the system (the first file of a name wins), so
+/// the bus starts the bridge (notify_bridge.rs) and never the notification
+/// server of the host (dunst) in the sandbox. `socket` is the socket of the
+/// notifications of the host, or "": then the bridge stops with an error.
+fn bus_files(services: &str, exe: &str, socket: &str, session_conf: &str) -> (String, String) {
+    let xml = |s: &str| s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+    let config = format!(
+        "<!DOCTYPE busconfig PUBLIC \"-//freedesktop//DTD D-BUS Bus Configuration 1.0//EN\"\n \"http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd\">\n<busconfig>\n  <servicedir>{}</servicedir>\n  <include>{}</include>\n</busconfig>\n",
+        xml(services),
+        xml(session_conf)
+    );
+    let service = format!("[D-BUS Service]\nName=org.freedesktop.Notifications\nExec={exe} __notify_bridge {socket}\n");
+    (config, service.replace(" \n", "\n"))
+}
+
+/// Write the files of `bus_files` in `dir`, and return the configuration
+/// file. On an error, the configuration of the system.
+fn write_bus_files(dir: &str, socket: &str) -> String {
+    let services = format!("{dir}/services");
+    let (config, service) = bus_files(&services, &process::self_exe(), socket, tools::dbus_session_conf());
+    let path = format!("{dir}/session.conf");
+    let written = fs::create_dir_all(&services)
+        .and_then(|_| fs::write(format!("{services}/org.freedesktop.Notifications.service"), service))
+        .and_then(|_| fs::write(&path, config));
+    match written {
+        Ok(()) => path,
+        Err(e) => {
+            eprintln!("sandbox-init: cannot write the configuration of the bus in {dir}: {e}");
+            tools::dbus_session_conf().to_string()
+        }
+    }
+}
+
 pub fn main(args: &[String]) -> ! {
     let runtime = util::env("XDG_RUNTIME_DIR").unwrap_or_else(|| "/tmp".into());
     let envfile = format!("{runtime}/sandbox-init.env");
@@ -93,10 +130,11 @@ pub fn main(args: &[String]) -> ! {
     if on("SANDBOX_INIT_DBUS") {
         let addr = format!("unix:path={runtime}/bus");
         let log = fs::File::create(format!("{runtime}/dbus-daemon.log")).ok();
+        let config = write_bus_files(&format!("{runtime}/sandbox-dbus"), &util::env("SANDBOX_INIT_NOTIFY").unwrap_or_default());
         // --fork returns when the bus is ready.
         let st = Command::new(tools::dbus_daemon())
             .args([
-                &format!("--config-file={}", tools::dbus_session_conf()),
+                &format!("--config-file={config}"),
                 &format!("--address={addr}"),
                 "--fork",
                 "--nopidfile",
@@ -147,7 +185,7 @@ pub fn main(args: &[String]) -> ! {
         }
     }
 
-    for v in ["SANDBOX_INIT_DBUS", "SANDBOX_INIT_X11", "SANDBOX_INIT_X11_DISPLAY"] {
+    for v in ["SANDBOX_INIT_DBUS", "SANDBOX_INIT_NOTIFY", "SANDBOX_INIT_X11", "SANDBOX_INIT_X11_DISPLAY"] {
         // SAFETY: this process has one thread.
         unsafe { std::env::remove_var(v) };
     }
@@ -181,6 +219,70 @@ pub fn main(args: &[String]) -> ! {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_service_file_of_the_notifications() {
+        let (config, service) = bus_files("/run/user/1/sandbox-dbus/services", "/s/bin/sandbox", "/run/user/1/sandbox-notify", "/d/session.conf");
+        assert!(config.contains("<servicedir>/run/user/1/sandbox-dbus/services</servicedir>\n  <include>/d/session.conf</include>"));
+        assert_eq!(service, "[D-BUS Service]\nName=org.freedesktop.Notifications\nExec=/s/bin/sandbox __notify_bridge /run/user/1/sandbox-notify\n");
+        let (_, service) = bus_files("/x", "/s/bin/sandbox", "", "/d");
+        assert!(service.ends_with("Exec=/s/bin/sandbox __notify_bridge\n"));
+    }
+
+    /// With a real dbus-daemon: the bus starts the program of the sandbox
+    /// for org.freedesktop.Notifications, not the notification server of
+    /// the system. Without dbus-daemon, the test does not run.
+    #[test]
+    fn the_bus_starts_the_bridge_and_not_dunst() {
+        use crate::dbus::{Conn, Message, Value};
+        let dir = std::env::temp_dir().join(format!("sandbox-init-bus-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let d = dir.to_str().unwrap().to_string();
+        let system = format!("{d}/system/dbus-1/services");
+        fs::create_dir_all(&system).unwrap();
+        let fake = |who: &str| {
+            let path = format!("{d}/{who}");
+            // Exit status 1: for status 0, the bus waits for the name (a
+            // program that forks), until its timeout.
+            fs::write(&path, format!("#!/bin/sh\necho {who} >> {d}/started\nexit 1\n")).unwrap();
+            fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+            path
+        };
+        let dunst = fake("dunst");
+        fs::write(format!("{system}/org.knopwob.dunst.service"), format!("[D-BUS Service]\nName=org.freedesktop.Notifications\nExec={dunst}\n")).unwrap();
+        let services = format!("{d}/sandbox-dbus/services");
+        fs::create_dir_all(&services).unwrap();
+        let (config, service) = bus_files(&services, &fake("bridge"), "", tools::dbus_session_conf());
+        fs::write(format!("{services}/org.freedesktop.Notifications.service"), service).unwrap();
+        fs::write(format!("{d}/session.conf"), config).unwrap();
+
+        let address = format!("unix:path={d}/bus");
+        let Ok(mut daemon) = Command::new(tools::dbus_daemon())
+            .args([&format!("--config-file={d}/session.conf"), &format!("--address={address}"), "--nofork", "--nopidfile"])
+            .env("XDG_DATA_DIRS", format!("{d}/system"))
+            .env("XDG_DATA_HOME", format!("{d}/none"))
+            .stderr(Stdio::null())
+            .spawn()
+        else {
+            eprintln!("no dbus-daemon: the test does not run");
+            return;
+        };
+        for _ in 0..500 {
+            if util::exists(&format!("{d}/bus")) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let mut c = Conn::connect(&address).unwrap();
+        // The fake bridge stops with an error: the call is an error, but
+        // the bus started it.
+        let start = Message::call("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "StartServiceByName", vec![Value::str("org.freedesktop.Notifications"), Value::U32(0)]);
+        assert!(c.call(start).is_err());
+        let _ = daemon.kill();
+        let _ = daemon.wait();
+        assert_eq!(fs::read_to_string(format!("{d}/started")).unwrap(), "bridge\n");
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn env_file_round_trip() {

@@ -83,6 +83,9 @@ pub struct Request<'a> {
     /// context (wayland.rs), not the socket of the compositor. None: the
     /// caller could not make it, and the sandbox gets no Wayland socket.
     pub wayland: Option<String>,
+    /// The socket of the notifications of the host (notify_host.rs). None:
+    /// the notifications of the sandbox give an error.
+    pub notify: Option<String>,
     /// The state directory of the container ("" for Mode::Run).
     pub state: String,
     /// The command after sandbox-init.
@@ -331,6 +334,15 @@ pub fn build_on(req: &Request, host: &dyn Host) -> Result<Built> {
         if e.dbus == Service::Private && mode != Mode::Join {
             b.setenv("SANDBOX_INIT_DBUS", "1");
             init = true;
+        }
+        // The notifications of the private bus go to the host on the socket
+        // of the container (notify_bridge.rs, notify_host.rs).
+        if let (Service::Private, true, Some(sock)) = (&e.dbus, e.notifications, &req.notify) {
+            let dst = format!("{run}/sandbox-notify");
+            b.mnt(MountType::Bind, sock, &dst, "rw");
+            if mode != Mode::Join {
+                b.setenv("SANDBOX_INIT_NOTIFY", &dst);
+            }
         }
         // There is no accessibility bus, and GTK must not look for it.
         b.setenv("NO_AT_BRIDGE", "1");

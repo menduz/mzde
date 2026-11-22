@@ -105,7 +105,7 @@ pub fn env_json(name: &str, home: &str) -> Value {
         "description": format!("sandbox {name}"), "color": "#008080", "gtkTheme": null, "backend": "bwrap", "hostname": name,
         "persistentHome": true, "homeDirectory": home, "homePatterns": [], "paths": [], "env": {},
         "sshWrite": false, "gpg": false, "docker": false, "fuse": false, "gui": false,
-        "x11": "none", "dbus": "none", "nvidia": false, "kvm": false, "audio": false,
+        "x11": "none", "dbus": "none", "notifications": true, "nvidia": false, "kvm": false, "audio": false,
         "libvirt": false, "nix": false, "allowHome": false, "internetAccess": true, "lanAccess": true,
         "allowHosts": [], "disableNetworking": true, "shareHostNetwork": false,
         "mountHomeCache": false, "mountCommonHomeFolders": false, "mountTmp": false, "sharedTmp": false,

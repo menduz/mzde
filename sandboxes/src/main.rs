@@ -12,10 +12,13 @@ mod backend;
 mod cli;
 mod command;
 mod config;
+mod dbus;
 mod host;
 mod init;
 mod net;
 mod notify;
+mod notify_bridge;
+mod notify_host;
 mod plan;
 mod process;
 mod pty;
@@ -48,6 +51,7 @@ fn cmd_plan(args: &[String]) {
         mode,
         resolv,
         wayland: Some(format!("{}/wayland-0", args[2])),
+        notify: None,
         state: args[3].clone(),
         command,
     })
@@ -96,6 +100,8 @@ fn main() {
         "__command" => command::main(rest),
         "__yolo" => command::yolo(rest),
         "__notify" => notify::main(rest),
+        "__notify_host" => notify_host::main(rest),
+        "__notify_bridge" => notify_bridge::main(rest),
         "__plan" => cmd_plan(rest),
         _ => {
             eprint!("{}", cli::USAGE);

@@ -18,6 +18,7 @@ fn build_wayland(c: &Config, h: &Fake, mode: Mode, wayland: Option<&str>) -> Res
             mode,
             resolv: "/T/resolv.conf".into(),
             wayland: wayland.map(String::from),
+            notify: Some("/C/notify".into()),
             state: "/S".into(),
             command: vec!["cmd".into(), "arg".into()],
         },
@@ -324,6 +325,25 @@ fn host_dbus_mounts_the_bus_of_the_host() {
     assert_eq!(env(&b, "DBUS_SESSION_BUS_ADDRESS"), Some("unix:path=/run/user/1000/bus"));
     assert_eq!(env(&b, "NO_AT_BRIDGE"), None);
     assert_eq!(env(&b, "SANDBOX_INIT_DBUS"), None);
+}
+
+#[test]
+fn the_notifications_of_a_private_bus() {
+    let h = Fake::new();
+    let b = build(&config(json!({"x11": "none"})), &h);
+    assert!(has(&b, "bind /C/notify /run/user/1000/sandbox-notify rw"));
+    assert_eq!(env(&b, "SANDBOX_INIT_NOTIFY"), Some("/run/user/1000/sandbox-notify"));
+    // A run in the container has the mount of the container, and sandbox-init
+    // does not start the bus again.
+    let b = build_mode(&config(json!({"x11": "none"})), &h, Mode::Join).unwrap();
+    assert!(has(&b, "bind /C/notify /run/user/1000/sandbox-notify rw"));
+    assert_eq!(env(&b, "SANDBOX_INIT_NOTIFY"), None);
+    // notifications = false, or no private bus: no socket.
+    for patch in [json!({"x11": "none", "notifications": false}), json!({"x11": "none", "dbus": "none"}), json!({"x11": "none", "dbus": "host"})] {
+        let b = build(&config(patch), &h);
+        assert!(!lines(&b).iter().any(|l| l.contains("sandbox-notify")));
+        assert_eq!(env(&b, "SANDBOX_INIT_NOTIFY"), None);
+    }
 }
 
 #[test]
@@ -702,6 +722,7 @@ fn unknown_backend_and_sandbox() {
             mode: Mode::Run,
             resolv: String::new(),
             wayland: None,
+            notify: None,
             state: String::new(),
             command: vec![],
         },

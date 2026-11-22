@@ -26,6 +26,53 @@ let
     touch written
     echo "$SANDBOX_NAME:$PWD:$(ls ~/work | xargs):$(hostname):$(cat ~/notes 2>/dev/null)"
   '';
+  # A notification server on the session bus of the host: it writes each
+  # Notify as one line of JSON to the file of its argument.
+  fakeNotifications = pkgs.writers.writePython3Bin "fake-notifications" {
+    libraries = [ pkgs.python3Packages.dbus-next ];
+    # The annotations of dbus-next are D-Bus types, not Python names.
+    doCheck = false;
+  } ''
+    import asyncio
+    import json
+    import sys
+
+    from dbus_next.aio import MessageBus
+    from dbus_next.service import ServiceInterface, method
+
+
+    class Notifications(ServiceInterface):
+        def __init__(self):
+            super().__init__("org.freedesktop.Notifications")
+            self.last = 40
+
+        @method()
+        def Notify(self, app: "s", replaces: "u", icon: "s", summary: "s",
+                   body: "s", actions: "as", hints: "a{sv}",
+                   timeout: "i") -> "u":
+            self.last += 1
+            h = {k: v.value if isinstance(v.value, (str, int)) else "?"
+                 for k, v in hints.items()}
+            with open(sys.argv[1], "a") as f:
+                f.write(json.dumps({"app": app, "replaces": replaces,
+                                    "icon": icon, "summary": summary,
+                                    "body": body, "hints": h}) + "\n")
+            return self.last
+
+        @method()
+        def CloseNotification(self, id: "u"):
+            pass
+
+
+    async def main():
+        bus = await MessageBus().connect()
+        bus.export("/org/freedesktop/Notifications", Notifications())
+        await bus.request_name("org.freedesktop.Notifications")
+        await asyncio.get_running_loop().create_future()
+
+
+    asyncio.run(main())
+  '';
 in
 {
   name = "sandboxes";
@@ -64,7 +111,9 @@ in
       }
     ];
     environment.systemPackages = [
+      fakeNotifications
       pkgs.curl
+      pkgs.libnotify
       pkgs.microsocks
       pkgs.openssh
       pkgs.procps
@@ -123,6 +172,7 @@ in
           allowHosts = [ "203.0.113.10" ];
         };
         none.disableNetworking = true;
+        quiet.notifications = false;
         hostnet.shareHostNetwork = true;
         disposable.persistentHome = false;
         sharedtmp.sharedTmp = true;
@@ -518,6 +568,33 @@ in
             assert "is-tty" in client.succeed(run + f"timeout 60 script -qec \"sandbox run {env} -- sh -c \\\"test -t 0 && test -t 1 && echo is-tty\\\"\" /dev/null'"), env
             rc = client.execute(run + f"timeout 60 script -qec \"sandbox run {env} -- sh -c \\\"exit 7\\\"\" /dev/null'")[0]
             assert rc == 7, f"{env}: exit code {rc}"
+
+    with subtest("notifications"):
+        notif_log = "/tmp/notifications.log"
+        client.succeed(f"su - alice -c 'XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus fake-notifications {notif_log} >/tmp/fake-notifications.out 2>&1 &'")
+        has_owner = "dbus-send --session --print-reply --dest=org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.NameHasOwner string:org.freedesktop.Notifications | grep -q true"
+        client.wait_until_succeeds(run + has_owner + "'")
+        for env, color in [("net", "#008080"), ("gnet", "#800080")]:
+            client.succeed(f"rm -f {notif_log}")
+            # The private bus starts the bridge; the container sends the
+            # notification to the server of the host.
+            sc(env, "notify-send -u critical -i /etc/passwd -h string:x-dunst-stack-tag:host hello body")
+            n = json.loads(client.succeed(f"cat {notif_log}").splitlines()[-1])
+            assert n["app"] == f"{env}: notify-send", n
+            assert n["summary"] == f"{env}: hello" and n["body"] == "body", n
+            assert n["icon"] == "", n
+            assert n["hints"].get("urgency") == 2 and n["hints"].get("frcolor") == color, n
+            assert "x-dunst-stack-tag" not in n["hints"], n
+            # The server of the sandbox is the bridge, not the server of the
+            # host.
+            assert "sandbox" in sc(env, "notify-send --version >/dev/null; dbus-send --session --print-reply --dest=org.freedesktop.Notifications /org/freedesktop/Notifications org.freedesktop.Notifications.GetServerInformation"), env
+            # A run without a container has no notifications.
+            sb(env, "notify-send nope", ok=False)
+        # notifications = false: an error, and nothing on the host.
+        client.succeed(f"rm -f {notif_log}")
+        sc("quiet", "notify-send nope", ok=False)
+        client.fail(f"test -e {notif_log}")
+        client.succeed("pkill -u alice -f fake-notifications")
 
     with subtest("cli"):
         names = client.succeed("su - alice -c 'sandbox list --names'").split()

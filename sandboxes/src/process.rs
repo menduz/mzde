@@ -379,6 +379,7 @@ mod tests {
 
     #[test]
     fn wait_forwarding_gives_term_to_the_child() {
+        let _signals = crate::testutil::signals();
         let child = std::process::Command::new("sleep").arg("30").spawn().unwrap();
         let pid = child.id() as libc::pid_t;
         // A TERM before the wait: it must not stay in the flags.
@@ -397,6 +398,7 @@ mod tests {
 
     #[test]
     fn signals_come_once() {
+        let _signals = crate::testutil::signals();
         catch_signals(&[libc::SIGUSR2]);
         // SAFETY: a signal to this process, with a handler.
         unsafe { libc::raise(libc::SIGUSR2) };

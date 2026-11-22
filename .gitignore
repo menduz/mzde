@@ -3,4 +3,5 @@ result-*
 zig-out
 .zig-cache
 sandboxes/proof/
+sandboxes/proof-notify/
 sandboxes/target/

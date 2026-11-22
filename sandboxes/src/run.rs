@@ -22,11 +22,12 @@ use serde_json::{Map, Value};
 use std::collections::BTreeSet;
 use std::fs;
 use std::os::fd::{AsRawFd, OwnedFd};
+use std::os::unix::net::UnixListener;
 use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
 
-use crate::config::{Config, Net};
+use crate::config::{Config, Env, Net, Service};
 use crate::net;
 use crate::plan::{self, Mode, MountType, Plan, Request};
 use crate::process::{self, catch_signals, take_signals};
@@ -155,6 +156,32 @@ fn wayland_context(gui: bool, name: &str, path: &str) -> Option<(wayland::Contex
     }
 }
 
+/// The host side of the notifications of the sandbox (notify_host.rs): a
+/// listening socket at `path`, on fd 0 of `sandbox __notify_host`. None
+/// without a private bus or with `notifications = false`; None with a
+/// warning if the helper cannot start.
+fn notify_helper(e: &Env, name: &str, path: &str) -> Option<(libc::pid_t, String)> {
+    if e.dbus != Service::Private || !e.notifications {
+        return None;
+    }
+    let _ = fs::remove_file(path);
+    let started = UnixListener::bind(path).map_err(|err| format!("cannot make the socket {path}: {err}")).and_then(|l| {
+        Command::new(process::self_exe())
+            .args(["__notify_host", name, &e.color])
+            .stdin(Stdio::from(OwnedFd::from(l)))
+            .stdout(Stdio::null())
+            .spawn()
+            .map_err(|err| err.to_string())
+    });
+    match started {
+        Ok(child) => Some((child.id() as libc::pid_t, path.to_string())),
+        Err(err) => {
+            warn!("the notifications of {name}: {err}");
+            None
+        }
+    }
+}
+
 pub fn cmd_container(args: &[String]) -> ! {
     if args.len() != 1 {
         die!("usage: sandbox __container NAME");
@@ -177,12 +204,15 @@ pub fn cmd_container(args: &[String]) -> ! {
     let state = format!("{dir}/backend");
     // The Wayland socket of the container: it stays while this process runs.
     let wayland = wayland_context(e.gui, name, &format!("{dir}/wayland-0"));
+    // The notifications of the sandbox: the helper stops with the container.
+    let notify_helper = notify_helper(e, name, &format!("{dir}/notify"));
     let built = plan::build(&Request {
         config: &config,
         name,
         mode: Mode::Container,
         resolv: format!("{dir}/resolv.conf"),
         wayland: wayland.as_ref().map(|w| w.1.clone()),
+        notify: notify_helper.as_ref().map(|h| h.1.clone()),
         state: state.clone(),
         command: Vec::new(),
     })
@@ -216,7 +246,7 @@ pub fn cmd_container(args: &[String]) -> ! {
         pids.push(child.id() as libc::pid_t);
     }
     let stop = |pids: &[libc::pid_t], dir: &str| {
-        for &p in pids {
+        for &p in pids.iter().chain(notify_helper.as_ref().map(|h| &h.0)) {
             process::kill(p, libc::SIGTERM);
         }
         let _ = fs::remove_dir_all(dir);
@@ -271,6 +301,11 @@ pub fn cmd_container(args: &[String]) -> ! {
             Some((-1, _)) => {
                 stop(&pids, &dir);
                 die!("the container of {name} stopped");
+            }
+            // The container stays; its programs get an error for each
+            // notification.
+            Some((p, status)) if notify_helper.as_ref().is_some_and(|h| h.0 == p) => {
+                warn!("the notifications of {name} stopped (exit code {})", process::code_raw(status));
             }
             _ => {}
         }
@@ -492,6 +527,7 @@ pub fn cmd_run(args: &[String]) -> ! {
             resolv: format!("{cdir}/resolv.conf"),
             // The socket of the container (cmd_container).
             wayland: Some(format!("{cdir}/wayland-0")).filter(|p| util::is_socket(p)),
+            notify: Some(format!("{cdir}/notify")).filter(|p| util::is_socket(p)),
             state: format!("{cdir}/backend"),
             command: args.clone(),
         }
@@ -503,6 +539,8 @@ pub fn cmd_run(args: &[String]) -> ! {
             mode: Mode::Run,
             resolv: format!("{tmp}/resolv.conf"),
             wayland: wayland.as_ref().map(|w| w.1.clone()),
+            // A run without a container has no notifications of the host.
+            notify: None,
             state: String::new(),
             command: args.clone(),
         }

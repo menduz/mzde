@@ -11,7 +11,7 @@ pub fn env_json() -> Value {
         "persistentHome": true, "homeDirectory": "~/.local/share/sandboxes/s/home",
         "homePatterns": [], "paths": [], "env": {},
         "sshWrite": false, "gpg": false, "docker": false, "fuse": false, "gui": false,
-        "x11": "private", "dbus": "private", "nvidia": false, "kvm": false, "audio": false,
+        "x11": "private", "dbus": "private", "notifications": true, "nvidia": false, "kvm": false, "audio": false,
         "libvirt": false, "nix": false, "allowHome": false, "internetAccess": true, "lanAccess": true,
         "allowHosts": [], "disableNetworking": false, "shareHostNetwork": false,
         "mountHomeCache": false, "mountCommonHomeFolders": false, "mountTmp": false, "sharedTmp": false,
@@ -66,3 +66,12 @@ pub fn config_top(patch: Value, top: Value) -> Config {
     serde_json::from_value(c).expect("the test configuration")
 }
 
+
+/// The tests that catch, raise or take signals hold this lock. The flags of
+/// catch_signals are of the process: without the lock, the proxy of a pty
+/// test can take a signal that another test raised, and give it to its
+/// child.
+pub fn signals() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}

@@ -238,6 +238,7 @@ mod tests {
     /// Run a shell script on a new pty, with `input` as the keyboard. The
     /// result: the exit code and the output.
     fn run(script: &str, input: &[u8]) -> (i32, String) {
+        let _signals = crate::testutil::signals();
         let pty = open().unwrap();
         let mut cmd = Command::new("/bin/sh");
         cmd.args(["-c", script]);
