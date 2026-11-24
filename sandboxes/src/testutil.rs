@@ -2,6 +2,10 @@
 
 use crate::config::Config;
 use serde_json::{Value, json};
+use std::process::{Child, Command, Stdio};
+use std::time::{Duration, Instant};
+
+use crate::tools;
 
 /// A sandbox "s" with the defaults of module.nix, except gui (false here:
 /// the tests of gui set it).
@@ -11,7 +15,7 @@ pub fn env_json() -> Value {
         "persistentHome": true, "homeDirectory": "~/.local/share/sandboxes/s/home",
         "homePatterns": [], "paths": [], "env": {},
         "sshWrite": false, "gpg": false, "docker": false, "fuse": false, "gui": false,
-        "x11": "private", "dbus": "private", "notifications": true, "nvidia": false, "kvm": false, "audio": false,
+        "x11": "private", "dbus": "private", "notifications": true, "followColorScheme": false, "nvidia": false, "kvm": false, "audio": false,
         "libvirt": false, "nix": false, "allowHome": false, "internetAccess": true, "lanAccess": true,
         "allowHosts": [], "disableNetworking": false, "shareHostNetwork": false,
         "mountHomeCache": false, "mountCommonHomeFolders": false, "mountTmp": false, "sharedTmp": false,
@@ -74,4 +78,41 @@ pub fn config_top(patch: Value, top: Value) -> Config {
 pub fn signals() -> std::sync::MutexGuard<'static, ()> {
     static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
     LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// A dbus-daemon of a test. It stops at the end of the test.
+pub struct Bus {
+    child: Child,
+    pub address: String,
+}
+
+impl Drop for Bus {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+/// A dbus-daemon with the session configuration, or None.
+pub fn bus(dir: &std::path::Path, name: &str) -> Option<Bus> {
+    let path = dir.join(name);
+    let address = format!("unix:path={}", path.display());
+    let child = Command::new(tools::dbus_daemon())
+        .args([&format!("--config-file={}", tools::dbus_session_conf()), &format!("--address={address}"), "--nofork", "--nopidfile"])
+        // No service directories of the user: the bus must not start a
+        // service of the system (a notification server, a portal).
+        .env("XDG_DATA_HOME", dir.join("none"))
+        .env("XDG_DATA_DIRS", dir.join("none"))
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let start = Instant::now();
+    while !path.exists() {
+        if start.elapsed() > Duration::from_secs(10) {
+            return None;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    Some(Bus { child, address })
 }

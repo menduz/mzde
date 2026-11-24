@@ -29,3 +29,4 @@ tool!(dbus_daemon, "SANDBOX_TOOL_DBUS_DAEMON", "dbus-daemon");
 tool!(dbus_session_conf, "SANDBOX_TOOL_DBUS_SESSION_CONF", "/etc/dbus-1/session.conf");
 tool!(xwayland_satellite, "SANDBOX_TOOL_XWAYLAND_SATELLITE", "xwayland-satellite");
 tool!(notify_send, "SANDBOX_TOOL_NOTIFY_SEND", "notify-send");
+tool!(dconf, "SANDBOX_TOOL_DCONF", "dconf");

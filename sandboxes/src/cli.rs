@@ -432,6 +432,7 @@ pub fn cmd_show(args: &[String]) {
         resolv: "$TMP/resolv.conf".into(),
         wayland: Some("$TMP/wayland-0".into()),
         notify: None,
+        color_scheme: None,
         state: String::new(),
         command: vec!["CMD".into()],
     })

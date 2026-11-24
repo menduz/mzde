@@ -11,7 +11,11 @@
 //!
 //! - The summary starts with the name of the sandbox, and the app name is
 //!   "NAME: app": a sandbox cannot show a notification of the host. The
-//!   border has the color of the sandbox (the hint frcolor of dunst).
+//!   background has the color of the sandbox (the hint bgcolor of dunst),
+//!   with black or white text (fgcolor), and the border (frcolor) is that
+//!   color 60% nearer to the text color, so it is not lost in the
+//!   background. A critical notification keeps the background of the host:
+//!   only its border has the color of the sandbox.
 //! - Only some hints go to the host: urgency, category, transient,
 //!   resident, value and image-data (checked). No other hint, so a sandbox
 //!   cannot use the stack tag of a notification of the host. An icon is
@@ -201,6 +205,30 @@ fn image(i: &Image) -> Option<Value> {
     ]))
 }
 
+/// Black or white, the text color with the most contrast on `color`
+/// ("#rrggbb"), as in the labels of kwm (the luma of ITU-R BT.601).
+fn text_color(color: &str) -> &'static str {
+    let (r, g, b) = rgb(color);
+    if 299 * r + 587 * g + 114 * b > 140 * 1000 { "#000000" } else { "#ffffff" }
+}
+
+/// The red, green and blue of `color` ("#rrggbb"). A color that is not
+/// valid is black.
+fn rgb(color: &str) -> (u32, u32, u32) {
+    let rgb = color.strip_prefix('#').and_then(|h| u32::from_str_radix(h, 16).ok()).unwrap_or(0);
+    ((rgb >> 16) & 0xff, (rgb >> 8) & 0xff, rgb & 0xff)
+}
+
+/// The border of a notification on the background `color`: `color` 60%
+/// nearer to its text color, thus brighter on a dark color and darker on a
+/// light color.
+fn frame_color(color: &str) -> String {
+    let (r, g, b) = rgb(color);
+    let (tr, tg, tb) = rgb(text_color(color));
+    let mix = |c: u32, t: u32| (c * 40 + t * 60 + 50) / 100;
+    format!("#{:02x}{:02x}{:02x}", mix(r, tr), mix(g, tg), mix(b, tb))
+}
+
 /// The arguments of Notify on the host for the notification `n` of the
 /// sandbox `name` with the color `color` ("#rrggbb"). `replaces` is the ID
 /// that the notification replaces, only if it is a notification of the
@@ -236,7 +264,13 @@ pub fn host_args(name: &str, color: &str, n: &Notify, replaces: u32) -> Vec<Valu
     if let Some(img) = h.image.as_ref().and_then(image) {
         hint("image-data", img);
     }
-    hint("frcolor", Value::str(color));
+    if h.urgency == Some(2) {
+        hint("frcolor", Value::str(color));
+    } else {
+        hint("frcolor", Value::Str(frame_color(color)));
+        hint("bgcolor", Value::str(color));
+        hint("fgcolor", Value::str(text_color(color)));
+    }
 
     let timeout = if n.timeout < 0 { -1 } else { n.timeout.min(3_600_000) };
     vec![
@@ -550,7 +584,17 @@ mod tests {
         assert_eq!(a[3], Value::str("work: Hello there"));
         assert_eq!(a[4], Value::str("a\nb[31m"));
         assert_eq!(a[7], Value::I32(-1));
+        assert_eq!(hint(&a, "frcolor"), Some(&Value::str("#99cccc")));
+        assert_eq!(hint(&a, "bgcolor"), Some(&Value::str("#008080")));
+        assert_eq!(hint(&a, "fgcolor"), Some(&Value::str("#ffffff")));
+        assert_eq!(text_color("#f0c000"), "#000000");
+        // On a light color, the border is darker.
+        assert_eq!(frame_color("#f0c000"), "#604d00");
+        // A critical notification keeps the background of the host.
+        let n = Notify { hints: Hints { urgency: Some(2), ..Default::default() }, ..Default::default() };
+        let a = host_args("work", "#008080", &n, 0);
         assert_eq!(hint(&a, "frcolor"), Some(&Value::str("#008080")));
+        assert_eq!((hint(&a, "bgcolor"), hint(&a, "fgcolor")), (None, None));
         // No app name and no summary: the name of the sandbox.
         let a = host_args("work", "#008080", &Notify::default(), 0);
         assert_eq!((&a[0], &a[3]), (&Value::str("work"), &Value::str("work")));

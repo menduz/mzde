@@ -4,4 +4,5 @@ zig-out
 .zig-cache
 sandboxes/proof/
 sandboxes/proof-notify/
+sandboxes/proof-color-scheme/
 sandboxes/target/

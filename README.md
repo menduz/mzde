@@ -79,6 +79,11 @@ It has internet access, but no access to local networks.
 The `make` command runs only in sandboxes that define it.
 On the host, this command stops with an error.
 
+The `work` sandbox follows the light or dark scheme of the host, also while it runs.
+Its dark scheme is the `teal-dark` preset with the title bar color of `teal`
+(a sandbox gets `<preset>-dark` if win-classic-theme has it, else `dark`).
+To keep one scheme, set `followColorScheme = false`.
+
 Press Super+Space to open the rofi sandbox menu.
 Select a sandbox, or select `host` to run the program on the host.
 rofi then shows the program menu.

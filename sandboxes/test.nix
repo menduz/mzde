@@ -73,6 +73,54 @@ let
 
     asyncio.run(main())
   '';
+  # The settings portal of the host: color-scheme is the number in the file
+  # of its argument. After a change of the file, it sends SettingChanged.
+  fakePortal = pkgs.writers.writePython3Bin "fake-portal" {
+    libraries = [ pkgs.python3Packages.dbus-next ];
+    doCheck = false;
+  } ''
+    import asyncio
+    import sys
+
+    from dbus_next import Variant
+    from dbus_next.aio import MessageBus
+    from dbus_next.service import ServiceInterface, method, signal
+
+
+    def scheme():
+        with open(sys.argv[1]) as f:
+            return int(f.read())
+
+
+    class Settings(ServiceInterface):
+        def __init__(self):
+            super().__init__("org.freedesktop.portal.Settings")
+
+        @method()
+        def ReadOne(self, namespace: "s", key: "s") -> "v":
+            return Variant("u", scheme())
+
+        @signal()
+        def SettingChanged(self) -> "ssv":
+            return ["org.freedesktop.appearance", "color-scheme",
+                    Variant("u", scheme())]
+
+
+    async def main():
+        bus = await MessageBus().connect()
+        settings = Settings()
+        bus.export("/org/freedesktop/portal/desktop", settings)
+        await bus.request_name("org.freedesktop.portal.Desktop")
+        last = scheme()
+        while True:
+            await asyncio.sleep(0.2)
+            if scheme() != last:
+                last = scheme()
+                settings.SettingChanged()
+
+
+    asyncio.run(main())
+  '';
 in
 {
   name = "sandboxes";
@@ -112,6 +160,8 @@ in
     ];
     environment.systemPackages = [
       fakeNotifications
+      fakePortal
+      pkgs.dconf
       pkgs.curl
       pkgs.libnotify
       pkgs.microsocks
@@ -128,6 +178,8 @@ in
       "nft_queue"
       "nfnetlink_queue"
     ];
+    # The dconf service of the private buses (followColorScheme).
+    programs.dconf.enable = true;
     users.users.alice = {
       isNormalUser = true;
       uid = 1000;
@@ -164,6 +216,7 @@ in
         net = {
           color = "#008080";
           commands = { inherit whereami; };
+          followColorScheme = true;
         };
         lanonly.internetAccess = false;
         inetonly.lanAccess = false;
@@ -230,6 +283,7 @@ in
         gnet = {
           backend = "gvisor";
           color = "#800080";
+          followColorScheme = true;
         };
         glanonly = {
           backend = "gvisor";
@@ -584,6 +638,8 @@ in
             assert n["summary"] == f"{env}: hello" and n["body"] == "body", n
             assert n["icon"] == "", n
             assert n["hints"].get("urgency") == 2 and n["hints"].get("frcolor") == color, n
+            # Critical: the background of the host.
+            assert "bgcolor" not in n["hints"], n
             assert "x-dunst-stack-tag" not in n["hints"], n
             # The server of the sandbox is the bridge, not the server of the
             # host.
@@ -595,6 +651,33 @@ in
         sc("quiet", "notify-send nope", ok=False)
         client.fail(f"test -e {notif_log}")
         client.succeed("pkill -u alice -f fake-notifications")
+
+    with subtest("color scheme of the host"):
+        key = "/org/gnome/desktop/interface/color-scheme"
+        scheme_file = "/tmp/host-color-scheme"
+        client.succeed(f"echo 1 > {scheme_file} && chmod 644 {scheme_file}")
+        client.succeed(f"su - alice -c 'XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus fake-portal {scheme_file} >/tmp/fake-portal.out 2>&1 &'")
+        def dconf_read(env):
+            return client.succeed(run + f"sandbox run {env} -- dconf read {key}'").strip()
+        has_portal = "dbus-send --session --print-reply --dest=org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.NameHasOwner string:org.freedesktop.portal.Desktop | grep -q true"
+        client.wait_until_succeeds(run + has_portal + "'")
+        for env in ["net", "gnet"]:
+            client.succeed(run + f"sandbox run {env} -- sleep 304 >/dev/null 2>&1 &'")
+            client.wait_until_succeeds(run + f"systemctl --user -q is-active sandbox@{env}.service'")
+            # The value at the start, and each change of the host.
+            for n, value in [(1, "prefer-dark"), (2, "prefer-light"), (0, "default")]:
+                client.succeed(f"echo {n} > {scheme_file}")
+                retry(lambda _: dconf_read(env) == f"'{value}'", timeout_seconds=30)
+            # The sandbox cannot write to the directory of the host.
+            sc(env, "touch /run/user/1000/sandbox-color-scheme/color-scheme", ok=False)
+            sc(env, "pkill -xf sleep.304")
+            client.wait_until_succeeds(f"! su - alice -c 'XDG_RUNTIME_DIR=/run/user/1000 systemctl --user -q is-active sandbox@{env}.service'")
+        # followColorScheme = false (the default): the sandbox keeps its
+        # scheme.
+        client.succeed(f"echo 1 > {scheme_file}")
+        assert dconf_read("quiet") == "", "quiet follows the host"
+        sc("quiet", "test ! -e /run/user/1000/sandbox-color-scheme")
+        client.succeed("pkill -u alice -f fake-portal")
 
     with subtest("cli"):
         names = client.succeed("su - alice -c 'sandbox list --names'").split()

@@ -7,6 +7,7 @@
   rustPlatform,
   bubblewrap,
   dbus,
+  dconf,
   gnupg,
   gvisor,
   iproute2,
@@ -49,6 +50,7 @@ rustPlatform.buildRustPackage {
     SANDBOX_TOOL_DBUS_SESSION_CONF = "${dbus.out}/share/dbus-1/session.conf";
     SANDBOX_TOOL_XWAYLAND_SATELLITE = lib.getExe xwayland-satellite;
     SANDBOX_TOOL_NOTIFY_SEND = lib.getExe' libnotify "notify-send";
+    SANDBOX_TOOL_DCONF = lib.getExe' dconf "dconf";
   };
 
   # The program selects its function by the name of the link.

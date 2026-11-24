@@ -1,6 +1,8 @@
 //! The configuration of the sandboxes: /etc/sandboxes/config.json, which the
-//! NixOS module writes (refer to module.nix). The types are strict: a field
-//! that the module does not write is an error.
+//! NixOS module writes (refer to module.nix). A missing field or a wrong
+//! value is an error. A field that this version does not know is only a
+//! warning: a container keeps the `sandbox` of its start, but it reads the
+//! configuration of the system now, which a newer module can write.
 
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -11,7 +13,7 @@ use crate::util::{self, Result};
 pub const DEFAULT_PATH: &str = "/etc/sandboxes/config.json";
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct Config {
     pub menu: Menu,
     pub host: Host,
@@ -31,43 +33,55 @@ pub struct Config {
     #[serde(default)]
     pub commands: BTreeMap<String, BTreeMap<String, Command>>,
     pub environments: BTreeMap<String, Env>,
+    /// The fields that this version does not know (refer to `unknown`).
+    #[serde(flatten)]
+    pub unknown: BTreeMap<String, serde_json::Value>,
 }
 
 /// A program that runs only in some sandboxes (`commands` of a sandbox).
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct Command {
     /// The program in the store.
     pub program: String,
     pub cwd_only: bool,
     pub bwrap_args: Vec<String>,
+    /// The fields that this version does not know (refer to `unknown`).
+    #[serde(flatten)]
+    pub unknown: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct Menu {
     pub command: String,
     pub markup: bool,
+    /// The fields that this version does not know (refer to `unknown`).
+    #[serde(flatten)]
+    pub unknown: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct Host {
     pub color: String,
+    /// The fields that this version does not know (refer to `unknown`).
+    #[serde(flatten)]
+    pub unknown: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct Opensnitch {
     pub daemon: String,
     pub config: String,
+    /// The fields that this version does not know (refer to `unknown`).
+    #[serde(flatten)]
+    pub unknown: BTreeMap<String, serde_json::Value>,
 }
 
 /// One sandbox. All fields of config.json are here, so that a wrong field
 /// is an error; kwm and `sandbox list` read some of them as JSON.
 #[allow(dead_code)]
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct Env {
     pub description: String,
     pub color: String,
@@ -89,6 +103,9 @@ pub struct Env {
     /// Forward the notifications of the private bus to the host
     /// (notify_host.rs).
     pub notifications: bool,
+    /// Give the color scheme of the host to the private bus
+    /// (color_scheme.rs).
+    pub follow_color_scheme: bool,
     pub nvidia: bool,
     pub kvm: bool,
     pub audio: bool,
@@ -126,6 +143,9 @@ pub struct Env {
     pub files: BTreeMap<String, String>,
     /// The bin directories of the packages, in the order of `packages`.
     pub bin: Vec<String>,
+    /// The fields that this version does not know (refer to `unknown`).
+    #[serde(flatten)]
+    pub unknown: BTreeMap<String, serde_json::Value>,
 }
 
 /// x11 and dbus.
@@ -155,22 +175,26 @@ pub enum MountMode {
 
 /// A path below $HOME of an access option.
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct ConfigMount {
     pub mode: MountMode,
     pub path: String,
     /// With xdgRemap: the XDG directory that replaces `path` if it is on the
     /// host; else "".
     pub remap: String,
+    /// The fields that this version does not know (refer to `unknown`).
+    #[serde(flatten)]
+    pub unknown: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct EnvOpensnitch {
     pub enable: bool,
     pub directory: String,
     /// The directory of the rules of the configuration.
     pub rules: Option<String>,
+    /// The fields that this version does not know (refer to `unknown`).
+    #[serde(flatten)]
+    pub unknown: BTreeMap<String, serde_json::Value>,
 }
 
 /// The network of a sandbox.
@@ -194,11 +218,49 @@ impl Env {
 }
 
 impl Config {
-    /// Read the configuration of SANDBOX_CONFIG, or of the default path.
+    /// Read the configuration of SANDBOX_CONFIG, or of the default path. A
+    /// field that this version does not know is a warning.
     pub fn load() -> Result<Config> {
         let path = util::env("SANDBOX_CONFIG").unwrap_or_else(|| DEFAULT_PATH.to_string());
         let text = std::fs::read(&path).map_err(|e| format!("cannot read {path}: {e}"))?;
-        serde_json::from_slice(&text).map_err(|e| format!("{path}: {e}"))
+        let config: Config = serde_json::from_slice(&text).map_err(|e| format!("{path}: {e}"))?;
+        let unknown = config.unknown();
+        if !unknown.is_empty() {
+            crate::warn!(
+                "{path}: this version of sandbox does not know the fields {}; it ignores them. A running container keeps its version: sandbox stop NAME starts the new one.",
+                unknown.join(", ")
+            );
+        }
+        Ok(config)
+    }
+
+    /// The fields that this version does not know, as paths
+    /// ("environments.NAME.field").
+    pub fn unknown(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut add = |prefix: &str, m: &BTreeMap<String, serde_json::Value>| {
+            out.extend(m.keys().map(|k| if prefix.is_empty() { k.clone() } else { format!("{prefix}.{k}") }));
+        };
+        add("", &self.unknown);
+        add("menu", &self.menu.unknown);
+        add("host", &self.host.unknown);
+        if let Some(o) = &self.opensnitch {
+            add("opensnitch", &o.unknown);
+        }
+        for (name, by_env) in &self.commands {
+            for (env, c) in by_env {
+                add(&format!("commands.{name}.{env}"), &c.unknown);
+            }
+        }
+        for (name, e) in &self.environments {
+            let at = format!("environments.{name}");
+            add(&at, &e.unknown);
+            add(&format!("{at}.opensnitch"), &e.opensnitch.unknown);
+            for (i, m) in e.config_mounts.iter().enumerate() {
+                add(&format!("{at}.configMounts.{i}"), &m.unknown);
+            }
+        }
+        out
     }
 
     /// The sandbox NAME.
@@ -258,13 +320,21 @@ mod tests {
     }
 
     #[test]
-    fn an_unknown_field_is_an_error() {
+    fn an_unknown_field_is_only_a_warning() {
+        // A newer module: a field of a sandbox, of a mount, of a command and
+        // of the top level.
         let mut e = env_json();
-        e["extraField"] = json!(1);
-        assert!(parse(top(e)).unwrap_err().contains("unknown field `extraField`"));
-        let mut t = top(env_json());
+        e["extraField"] = json!({"a": 1});
+        e["configMounts"] = json!([{"mode": "ro", "path": ".a", "remap": "", "newer": true}]);
+        let mut t = top(e);
         t["other"] = json!(1);
-        assert!(parse(t).unwrap_err().contains("unknown field `other`"));
+        t["commands"] = json!({"claude": {"s": {"program": "/p", "cwdOnly": false, "bwrapArgs": [], "x": 1}}});
+        let c = parse(t).unwrap();
+        assert_eq!(c.unknown(), ["other", "commands.claude.s.x", "environments.s.extraField", "environments.s.configMounts.0.newer"]);
+        // The known fields keep their values.
+        assert_eq!(c.environments["s"].x11, Service::Private);
+        assert_eq!(c.environments["s"].config_mounts[0].mode, MountMode::Ro);
+        assert!(parse(top(env_json())).unwrap().unknown().is_empty());
     }
 
     #[test]

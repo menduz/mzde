@@ -9,8 +9,10 @@
 # sandboxes and the `sandbox` command, as the qubes of Qubes OS. With
 # programs.sandboxes.enable, mzde gives:
 #
-#   - a win-classic scheme for each sandbox (GTK and the rofi menu), from the
-#     preset in winTheme.preset of the sandbox,
+#   - a win-classic theme for each sandbox (GTK and the rofi menu): the
+#     preset in winTheme.preset of the sandbox, and a dark scheme in the
+#     colors of the sandbox. The sandbox follows the color scheme of the
+#     host (followColorScheme), so toggle-theme changes the sandboxes too,
 #   - the Ghostty configuration of each sandbox: mzde.sandboxes.ghostty.config
 #     with a background and a cursor in the sandbox color,
 #   - the read-only dotfiles of Home Manager in each sandbox
@@ -132,27 +134,60 @@ let
     esac
   '';
 
+  # The colors of the dark scheme of a sandbox that the light scheme gives:
+  # the title bar and the selection have the color of the sandbox also in
+  # the dark scheme.
+  sandboxColorKeys = [
+    "activetitle"
+    "activetitle1"
+    "activetitletext"
+    "selectedbg"
+    "selectedtext"
+  ];
+
   # The options that mzde adds to each sandbox. The options are always
   # there, so a configuration can set them also without mzde.enable.
   sandboxOptions =
     { name, config, ... }:
+    let
+      t = config.winTheme;
+      lightColors = presets.${t.preset} // t.colors;
+    in
     {
       options.winTheme = {
         preset = lib.mkOption {
           type = lib.types.enum (lib.attrNames presets);
           default = "windows-standard";
-          description = "The win-classic preset of the GTK theme of the sandbox.";
+          description = "The win-classic preset of the light scheme of the sandbox.";
         };
         colors = lib.mkOption {
           type = lib.types.attrsOf lib.types.str;
           default = { };
           description = "Colors that replace colors of the preset.";
         };
+        darkPreset = lib.mkOption {
+          type = lib.types.enum (lib.attrNames presets);
+          # A preset can have a dark scheme of its own: "teal-dark" for
+          # "teal".
+          default = if presets ? "${t.preset}-dark" then "${t.preset}-dark" else "dark";
+          defaultText = lib.literalMD ''"<preset>-dark" if that preset exists, else "dark"'';
+          description = "The win-classic preset of the dark scheme of the sandbox.";
+        };
+        darkColors = lib.mkOption {
+          type = lib.types.attrsOf lib.types.str;
+          default = lib.getAttrs (lib.filter (k: lightColors ? ${k}) sandboxColorKeys) lightColors;
+          defaultText = lib.literalMD "the title bar and selection colors of the light scheme";
+          description = "Colors that replace colors of `darkPreset`.";
+        };
         dark = lib.mkOption {
           type = lib.types.bool;
-          default = config.winTheme.preset == "dark";
+          default = t.preset == "dark";
           defaultText = lib.literalExpression ''winTheme.preset == "dark"'';
-          description = "Whether the scheme is a dark one (color-scheme prefer-dark).";
+          description = ''
+            Whether the light scheme is a dark one (color-scheme
+            prefer-dark). Such a sandbox does not follow the color scheme of
+            the host (followColorScheme is false).
+          '';
         };
         package = lib.mkOption {
           type = lib.types.package;
@@ -161,9 +196,15 @@ let
           # the style sheet for kwm.
           default = winTheme.mkPackage {
             name = "win-classic-sandbox-${name}";
-            inherit (config.winTheme) preset colors;
+            colorSchemes = {
+              light = { inherit (t) preset colors; };
+              dark = {
+                preset = t.darkPreset;
+                colors = t.darkColors;
+              };
+            };
           };
-          defaultText = lib.literalMD "the theme of the preset and the colors";
+          defaultText = lib.literalMD "the theme of the presets and the colors";
           description = "The built theme.";
         };
       };
@@ -186,6 +227,16 @@ let
     in
     {
       gtkTheme = lib.mkDefault themeName;
+
+      # gtkTheme is the theme with all schemes: GTK4 and libadwaita select the
+      # dark scheme of the sandbox from the color scheme, which follows the
+      # host. A sandbox with a dark light scheme stays dark.
+      followColorScheme = lib.mkDefault (!config.winTheme.dark);
+      # kwm draws the title bars of the sandbox with this theme when the host
+      # prefers dark, as the programs in the sandbox select the dark scheme.
+      gtkThemeDark = lib.mkDefault (
+        if config.followColorScheme then config.winTheme.package.names.dark else null
+      );
 
       # GTK on Wayland reads the fonts, the cursor and the icon theme from
       # GSettings. These are the values of the host, with the scheme of the

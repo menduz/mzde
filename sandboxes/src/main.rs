@@ -10,6 +10,7 @@
 
 mod backend;
 mod cli;
+mod color_scheme;
 mod command;
 mod config;
 mod dbus;
@@ -52,6 +53,7 @@ fn cmd_plan(args: &[String]) {
         resolv,
         wayland: Some(format!("{}/wayland-0", args[2])),
         notify: None,
+        color_scheme: None,
         state: args[3].clone(),
         command,
     })
@@ -102,6 +104,8 @@ fn main() {
         "__notify" => notify::main(rest),
         "__notify_host" => notify_host::main(rest),
         "__notify_bridge" => notify_bridge::main(rest),
+        "__color_scheme_host" => color_scheme::host_main(rest),
+        "__color_scheme" => color_scheme::main(rest),
         "__plan" => cmd_plan(rest),
         _ => {
             eprint!("{}", cli::USAGE);

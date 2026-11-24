@@ -19,6 +19,7 @@ fn build_wayland(c: &Config, h: &Fake, mode: Mode, wayland: Option<&str>) -> Res
             resolv: "/T/resolv.conf".into(),
             wayland: wayland.map(String::from),
             notify: Some("/C/notify".into()),
+            color_scheme: Some("/C/color-scheme".into()),
             state: "/S".into(),
             command: vec!["cmd".into(), "arg".into()],
         },
@@ -343,6 +344,27 @@ fn the_notifications_of_a_private_bus() {
         let b = build(&config(patch), &h);
         assert!(!lines(&b).iter().any(|l| l.contains("sandbox-notify")));
         assert_eq!(env(&b, "SANDBOX_INIT_NOTIFY"), None);
+    }
+}
+
+#[test]
+fn the_color_scheme_of_the_host() {
+    let h = Fake::new();
+    let on = json!({"x11": "none", "followColorScheme": true});
+    let b = build(&config(on.clone()), &h);
+    // Read-only: the sandbox cannot write to the host.
+    assert!(has(&b, "bind /C/color-scheme /run/user/1000/sandbox-color-scheme ro"));
+    assert_eq!(env(&b, "SANDBOX_INIT_COLOR_SCHEME"), Some("/run/user/1000/sandbox-color-scheme/color-scheme"));
+    // A run in the container has the mount of the container, and sandbox-init
+    // does not start the helper again.
+    let b = build_mode(&config(on), &h, Mode::Join).unwrap();
+    assert!(has(&b, "bind /C/color-scheme /run/user/1000/sandbox-color-scheme ro"));
+    assert_eq!(env(&b, "SANDBOX_INIT_COLOR_SCHEME"), None);
+    // followColorScheme = false (the default), or no private bus.
+    for patch in [json!({"x11": "none"}), json!({"x11": "none", "followColorScheme": true, "dbus": "none"}), json!({"x11": "none", "followColorScheme": true, "dbus": "host"})] {
+        let b = build(&config(patch), &h);
+        assert!(!lines(&b).iter().any(|l| l.contains("sandbox-color-scheme")));
+        assert_eq!(env(&b, "SANDBOX_INIT_COLOR_SCHEME"), None);
     }
 }
 
@@ -723,6 +745,7 @@ fn unknown_backend_and_sandbox() {
             resolv: String::new(),
             wayland: None,
             notify: None,
+            color_scheme: None,
             state: String::new(),
             command: vec![],
         },

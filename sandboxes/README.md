@@ -193,7 +193,9 @@ runs the unit tests.
   socket of the container to `sandbox __notify_host` (src/notify_host.rs),
   which the container starts on the host. The host side does not trust
   the sandbox: the summary starts with `NAME: `, the app name is
-  `NAME: app`, the border has the color of the sandbox (`frcolor`), an icon
+  `NAME: app`, the border and the background have the color of the sandbox (`frcolor`,
+  `bgcolor`; black or white text; a critical notification keeps the
+  background of the host), an icon
   is only a name of the icon theme, only urgency, category, transient,
   resident, value and image-data go to the host, the notifications have no
   actions (a click only closes them; the sandbox gets no ActionInvoked), a
@@ -204,6 +206,25 @@ runs the unit tests.
   and it can send 20 notifications at once, then 5 each second. src/dbus.rs is the
   D-Bus client of both (the wire protocol, no libdbus). A run without a
   container (`SANDBOX_NO_SCOPE`) has no notifications.
+- A sandbox with `followColorScheme` (default false) and a private bus gets
+  the color scheme of the host, also while it runs (src/color_scheme.rs).
+  The container starts `sandbox __color_scheme_host` on the host: it reads
+  `color-scheme` of the settings portal of the host
+  (`org.freedesktop.appearance`, and SettingChanged), and writes `default`,
+  `prefer-dark` or `prefer-light` to the directory `color-scheme/` of the
+  container. The sandbox gets that directory read-only, and
+  `sandbox __color_scheme` (sandbox-init starts it) writes each new value
+  to `org.gnome.desktop.interface.color-scheme` of the sandbox (`dconf
+  write` on the private bus); the settings portal of the sandbox then tells
+  GTK4, libadwaita and the other programs that read it. Nothing goes from
+  the sandbox to the host: the host side does not connect to the bus of the
+  sandbox and reads no file of it, and the sandbox side accepts only the
+  three values. The sandbox side reads the file each second (gVisor gives no
+  inotify event for a change on the host). GTK3 programs keep the theme of
+  `gtkTheme`. A run without a container keeps the scheme of the sandbox.
+  The window manager draws the title bars of the sandbox with
+  `gtkThemeDark` when the host prefers dark (kwm reads the same key of the
+  portal of the host).
 - The service has the log of the container and of the OpenSnitch daemon:
   `sandbox logs NAME` (`journalctl --user -u sandbox@NAME`; more arguments go
   to journalctl, for example `sandbox logs NAME -f`).
@@ -238,6 +259,7 @@ Each sandbox in `programs.sandboxes.environments.<name>`:
 | `description`            | `""`      | text for `sandbox list` and the menu |
 | `color`                  | `#808080` | label color, also in `SANDBOX_COLOR` |
 | `gtkTheme`               | `null`    | `GTK_THEME` of the programs |
+| `gtkThemeDark`           | `null`    | GTK theme of the title bars when the host prefers dark (`followColorScheme`) |
 | `backend`                | `bwrap`   | a name of `programs.sandboxes.backends` (`runsc` is `gvisor`) |
 | `backendArgs.<backend>`  | `[]`      | extra arguments for one backend |
 | `extraBubblewrapArgs`    | `[]`      | the same as `backendArgs.bwrap` |
@@ -276,6 +298,7 @@ Each sandbox in `programs.sandboxes.environments.<name>`:
 | `audio`                  | `false`   | PipeWire, PulseAudio, `/dev/snd` |
 | `dbus`                   | `private` | `private`: a session bus for the sandbox; `host`: the session bus of the host (no isolation); `none` |
 | `notifications`          | `true`    | with a private bus: the notifications go to the notification server of the host, with the name and the color of the sandbox |
+| `followColorScheme`      | `false`   | with a private bus: the color scheme of the host (settings portal) goes to the GSettings of the sandbox, also while it runs; nothing goes back |
 | `libvirt`                | `false`   | the libvirt sockets |
 | `nix`                    | `false`   | the store of the host through the Nix daemon, as an untrusted client (`nix-daemon --force-untrusted --process-ops`), and `~/.cache/nix` of the host, writable (the sandbox can write the eval cache of the host) |
 | `allowHome`              | `false`   | the real home directory, writable |
@@ -540,6 +563,11 @@ shell prompt. The kwm fork of menduz and `netgraph.sh` do this.
 - The mounts of a container do not change while it runs. A new
   configuration needs a new container (`sandbox stop NAME`). A smaller access applies to the running
   programs only after `sandbox stop NAME`.
+- A switch of the system does not stop a container, so a run in it keeps
+  the `sandbox` of the start of the container, with the new
+  `/etc/sandboxes/config.json`. A field of the configuration that this
+  version does not know is a warning (`does not know the fields ...`), not
+  an error; a missing field or a wrong value is an error.
 - A program that a run of gVisor starts in the background is in gVisor,
   not in the scope of the run: it does not keep the container, and it stops
   when the container stops after the last run.

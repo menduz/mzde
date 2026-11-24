@@ -6,51 +6,14 @@
 //! run.
 
 use std::os::unix::net::UnixListener;
-use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use crate::dbus::{Conn, Message, Type, Value};
 use crate::notify_host::{NOTIFICATIONS, PATH};
-use crate::tools;
+use crate::testutil::bus;
 
 const DBUS: &str = "org.freedesktop.DBus";
-
-struct Bus {
-    child: Child,
-    address: String,
-}
-
-impl Drop for Bus {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-    }
-}
-
-/// A dbus-daemon with the session configuration, or None.
-fn bus(dir: &std::path::Path, name: &str) -> Option<Bus> {
-    let path = dir.join(name);
-    let address = format!("unix:path={}", path.display());
-    let child = Command::new(tools::dbus_daemon())
-        .args([&format!("--config-file={}", tools::dbus_session_conf()), &format!("--address={address}"), "--nofork", "--nopidfile"])
-        // No service directories of the user: the bus must not start a
-        // notification server of the system.
-        .env("XDG_DATA_HOME", dir.join("none"))
-        .env("XDG_DATA_DIRS", dir.join("none"))
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
-    let start = Instant::now();
-    while !path.exists() {
-        if start.elapsed() > Duration::from_secs(10) {
-            return None;
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    Some(Bus { child, address })
-}
 
 fn dbus_call(c: &mut Conn, member: &str, body: Vec<Value>) -> Message {
     c.call(Message::call(DBUS, "/org/freedesktop/DBus", DBUS, member, body)).unwrap()
@@ -188,7 +151,7 @@ fn notifications_go_to_the_host_with_the_name_of_the_sandbox() {
     assert_eq!(args[3], Value::str("work: Hello world"));
     assert_eq!(args[7], Value::I32(5000));
     assert_eq!(hint(&args, "urgency"), Some(&Value::Variant(Box::new(Value::Byte(1)))));
-    assert_eq!(hint(&args, "frcolor"), Some(&Value::Variant(Box::new(Value::str("#008080")))));
+    assert_eq!(hint(&args, "frcolor"), Some(&Value::Variant(Box::new(Value::str("#99cccc")))));
     assert_eq!(hint(&args, "x-dunst-stack-tag"), None);
     // No actions.
     assert_eq!(args[5], Value::Array(Type::Str, vec![]));

@@ -36,6 +36,22 @@ fn list_names_json_and_table() {
     assert!(work.contains("none") && work.contains("ssh:rw,git"), "{work}");
 }
 
+/// A configuration of a newer module: a field that this version does not
+/// know is a warning, and the command works.
+#[test]
+fn an_unknown_field_is_a_warning() {
+    let d = Dir::new("cli-unknown-field");
+    d.config(json!({"work": {"newerOption": true}}), json!({"newerTop": 1}));
+    let o = d.run(&["list", "--names"]);
+    assert!(o.status.success(), "{}", stderr(&o));
+    assert_eq!(stdout(&o), "work\n");
+    let err = stderr(&o);
+    assert!(err.contains("does not know the fields newerTop, environments.work.newerOption; it ignores them"), "{err}");
+    // A known field with a wrong value is still an error.
+    d.config(json!({"work": {"gui": "sometimes"}}), json!({}));
+    assert_eq!(d.run(&["list", "--names"]).status.code(), Some(1));
+}
+
 #[test]
 fn home_and_backends() {
     let d = dir();

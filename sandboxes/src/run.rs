@@ -16,6 +16,8 @@
 //!   net.json, go  the settings of the network namespace
 //!   netns         "PID STARTTIME" of the process in the network namespace
 //!   backend/      the state directory of the backend
+//!   color-scheme/ the color scheme of the host, read-only in the sandbox
+//!                 (color_scheme.rs)
 //!   ready         the container can start programs
 
 use serde_json::{Map, Value};
@@ -182,6 +184,34 @@ fn notify_helper(e: &Env, name: &str, path: &str) -> Option<(libc::pid_t, String
     }
 }
 
+/// The host side of the color scheme of the sandbox (color_scheme.rs): the
+/// directory `path`, and `sandbox __color_scheme_host` that writes the color
+/// scheme of the host to it. None without a private bus or with
+/// `followColorScheme = false`; None with a warning if the helper cannot
+/// start.
+fn color_scheme_helper(e: &Env, name: &str, path: &str) -> Option<(libc::pid_t, String)> {
+    if e.dbus != Service::Private || !e.follow_color_scheme {
+        return None;
+    }
+    let started = private_dir(path).and_then(|_| {
+        Command::new(process::self_exe())
+            .args(["__color_scheme_host", path])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .spawn()
+            .map_err(|err| err.to_string())
+    });
+    match started {
+        Ok(child) => Some((child.id() as libc::pid_t, path.to_string())),
+        Err(err) => {
+            // A run in the container mounts the directory if it is there.
+            let _ = fs::remove_dir(path);
+            warn!("the color scheme of {name}: {err}");
+            None
+        }
+    }
+}
+
 pub fn cmd_container(args: &[String]) -> ! {
     if args.len() != 1 {
         die!("usage: sandbox __container NAME");
@@ -206,6 +236,8 @@ pub fn cmd_container(args: &[String]) -> ! {
     let wayland = wayland_context(e.gui, name, &format!("{dir}/wayland-0"));
     // The notifications of the sandbox: the helper stops with the container.
     let notify_helper = notify_helper(e, name, &format!("{dir}/notify"));
+    // The color scheme of the host: the helper stops with the container.
+    let color_helper = color_scheme_helper(e, name, &format!("{dir}/color-scheme"));
     let built = plan::build(&Request {
         config: &config,
         name,
@@ -213,6 +245,7 @@ pub fn cmd_container(args: &[String]) -> ! {
         resolv: format!("{dir}/resolv.conf"),
         wayland: wayland.as_ref().map(|w| w.1.clone()),
         notify: notify_helper.as_ref().map(|h| h.1.clone()),
+        color_scheme: color_helper.as_ref().map(|h| h.1.clone()),
         state: state.clone(),
         command: Vec::new(),
     })
@@ -246,7 +279,7 @@ pub fn cmd_container(args: &[String]) -> ! {
         pids.push(child.id() as libc::pid_t);
     }
     let stop = |pids: &[libc::pid_t], dir: &str| {
-        for &p in pids.iter().chain(notify_helper.as_ref().map(|h| &h.0)) {
+        for &p in pids.iter().chain(notify_helper.as_ref().map(|h| &h.0)).chain(color_helper.as_ref().map(|h| &h.0)) {
             process::kill(p, libc::SIGTERM);
         }
         let _ = fs::remove_dir_all(dir);
@@ -306,6 +339,10 @@ pub fn cmd_container(args: &[String]) -> ! {
             // notification.
             Some((p, status)) if notify_helper.as_ref().is_some_and(|h| h.0 == p) => {
                 warn!("the notifications of {name} stopped (exit code {})", process::code_raw(status));
+            }
+            // The container stays with the color scheme that it has now.
+            Some((p, status)) if color_helper.as_ref().is_some_and(|h| h.0 == p) => {
+                warn!("the color scheme of {name} stopped (exit code {})", process::code_raw(status));
             }
             _ => {}
         }
@@ -528,6 +565,7 @@ pub fn cmd_run(args: &[String]) -> ! {
             // The socket of the container (cmd_container).
             wayland: Some(format!("{cdir}/wayland-0")).filter(|p| util::is_socket(p)),
             notify: Some(format!("{cdir}/notify")).filter(|p| util::is_socket(p)),
+            color_scheme: Some(format!("{cdir}/color-scheme")).filter(|p| std::path::Path::new(p).is_dir()),
             state: format!("{cdir}/backend"),
             command: args.clone(),
         }
@@ -539,8 +577,10 @@ pub fn cmd_run(args: &[String]) -> ! {
             mode: Mode::Run,
             resolv: format!("{tmp}/resolv.conf"),
             wayland: wayland.as_ref().map(|w| w.1.clone()),
-            // A run without a container has no notifications of the host.
+            // A run without a container has no notifications and no color
+            // scheme of the host.
             notify: None,
+            color_scheme: None,
             state: String::new(),
             command: args.clone(),
         }

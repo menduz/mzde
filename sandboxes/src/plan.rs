@@ -86,6 +86,9 @@ pub struct Request<'a> {
     /// The socket of the notifications of the host (notify_host.rs). None:
     /// the notifications of the sandbox give an error.
     pub notify: Option<String>,
+    /// The directory of the color scheme of the host (color_scheme.rs).
+    /// None: the sandbox keeps its color scheme.
+    pub color_scheme: Option<String>,
     /// The state directory of the container ("" for Mode::Run).
     pub state: String,
     /// The command after sandbox-init.
@@ -342,6 +345,15 @@ pub fn build_on(req: &Request, host: &dyn Host) -> Result<Built> {
             b.mnt(MountType::Bind, sock, &dst, "rw");
             if mode != Mode::Join {
                 b.setenv("SANDBOX_INIT_NOTIFY", &dst);
+            }
+        }
+        // The color scheme of the host, read-only: sandbox-init writes it to
+        // the GSettings of the private bus (color_scheme.rs).
+        if let (Service::Private, true, Some(dir)) = (&e.dbus, e.follow_color_scheme, &req.color_scheme) {
+            let dst = format!("{run}/sandbox-color-scheme");
+            b.mnt(MountType::Bind, dir, &dst, "ro");
+            if mode != Mode::Join {
+                b.setenv("SANDBOX_INIT_COLOR_SCHEME", &format!("{dst}/{}", crate::color_scheme::FILE));
             }
         }
         // There is no accessibility bus, and GTK must not look for it.

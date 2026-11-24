@@ -5,6 +5,9 @@
 //!   SANDBOX_INIT_DBUS=1          a private session bus
 //!   SANDBOX_INIT_NOTIFY=PATH     the socket of the notifications of the
 //!                                host (notify_bridge.rs)
+//!   SANDBOX_INIT_COLOR_SCHEME=F  the file of the color scheme of the host:
+//!                                write it to the GSettings of the private
+//!                                bus (color_scheme.rs)
 //!   SANDBOX_INIT_X11=1           a private X server (xwayland-satellite)
 //!   SANDBOX_INIT_X11_DISPLAY=N   the first display number to try
 //!   SANDBOX_INIT_HOLD=1          the first process of the container of a
@@ -149,6 +152,18 @@ pub fn main(args: &[String]) -> ! {
                 // SAFETY: this process has one thread.
                 unsafe { std::env::set_var("DBUS_SESSION_BUS_ADDRESS", &addr) };
                 vars.push(("DBUS_SESSION_BUS_ADDRESS", addr));
+                if let Some(file) = util::env("SANDBOX_INIT_COLOR_SCHEME").filter(|f| !f.is_empty()) {
+                    let log = fs::File::create(format!("{runtime}/color-scheme.log")).ok();
+                    let started = Command::new(process::self_exe())
+                        .args(["__color_scheme", &file])
+                        .stdin(Stdio::null())
+                        .stdout(Stdio::null())
+                        .stderr(log.map(Stdio::from).unwrap_or(Stdio::null()))
+                        .spawn();
+                    if started.is_err() {
+                        eprintln!("sandbox-init: the color scheme of the host does not go to the sandbox");
+                    }
+                }
             }
             _ => eprintln!("sandbox-init: dbus-daemon did not start; refer to {runtime}/dbus-daemon.log"),
         }
@@ -185,7 +200,7 @@ pub fn main(args: &[String]) -> ! {
         }
     }
 
-    for v in ["SANDBOX_INIT_DBUS", "SANDBOX_INIT_NOTIFY", "SANDBOX_INIT_X11", "SANDBOX_INIT_X11_DISPLAY"] {
+    for v in ["SANDBOX_INIT_DBUS", "SANDBOX_INIT_NOTIFY", "SANDBOX_INIT_COLOR_SCHEME", "SANDBOX_INIT_X11", "SANDBOX_INIT_X11_DISPLAY"] {
         // SAFETY: this process has one thread.
         unsafe { std::env::remove_var(v) };
     }

@@ -134,9 +134,11 @@ let
   # yolo: claude with --dangerously-skip-permissions. The wrapper is at the
   # start of PATH, and it starts the next claude in PATH (`sandbox __yolo`
   # removes the directory of the wrapper from PATH).
-  yoloClaude = pkgs.runCommand "sandbox-yolo-claude" { nativeBuildInputs = [ pkgs.makeBinaryWrapper ]; } ''
-    makeWrapper ${lib.getExe cfg.package} $out/bin/claude --add-flags "__yolo $out/bin"
-  '';
+  yoloClaude =
+    pkgs.runCommand "sandbox-yolo-claude" { nativeBuildInputs = [ pkgs.makeBinaryWrapper ]; }
+      ''
+        makeWrapper ${lib.getExe cfg.package} $out/bin/claude --add-flags "__yolo $out/bin"
+      '';
 
   # "KEY=VALUE" to { name = KEY; value = VALUE; }.
   parseEnv =
@@ -257,6 +259,19 @@ let
           description = ''
             The GTK_THEME of the programs. The theme must be in a directory of
             XDG_DATA_DIRS, for example in environment.systemPackages.
+          '';
+        };
+
+        gtkThemeDark = mkOption {
+          type = types.nullOr types.str;
+          default = null;
+          example = "Adwaita-dark";
+          description = ''
+            The GTK theme of the sandbox when the host prefers dark, for a
+            sandbox with `followColorScheme`. A window manager reads it from
+            /etc/sandboxes/config.json and draws the borders and title bars
+            of the windows of the sandbox with its colors. The programs do
+            not get it: they select the scheme from the color scheme.
           '';
         };
 
@@ -468,6 +483,21 @@ let
           rate limit) and lets the sandbox replace or close only its own
           notifications. false: the programs get an error for each
           notification.
+        '';
+        followColorScheme = bool false ''
+          Give the color scheme of the host (color-scheme of the settings
+          portal: dark, light or no preference) to the sandbox, also while
+          it runs. Needs `dbus = "private"` and a container (not
+          `SANDBOX_NO_SCOPE`). On the host, the container reads the portal
+          and writes the value to a directory that the sandbox gets
+          read-only; in the sandbox, `sandbox __color_scheme` writes each
+          new value to the GSettings key
+          org.gnome.desktop.interface.color-scheme of the sandbox. The
+          settings portal of the sandbox then tells GTK4, libadwaita and
+          the other programs that read the portal. Nothing goes from the
+          sandbox to the host. The value stays in the dconf database of the
+          sandbox home directory, above `dconfSettings`. GTK3 programs with
+          `gtkTheme` do not change.
         '';
         nvidia = bool false "Mount the NVIDIA devices.";
         kvm = bool false "Mount /dev/kvm and /dev/vfio.";
@@ -767,6 +797,7 @@ let
       description
       color
       gtkTheme
+      gtkThemeDark
       backend
       hostname
       persistentHome
@@ -782,6 +813,7 @@ let
       x11
       dbus
       notifications
+      followColorScheme
       nvidia
       kvm
       audio
