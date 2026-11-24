@@ -1222,6 +1222,11 @@ in
     systemd.user.services."sandbox@" = {
       description = "Container of the sandbox %i";
       unitConfig.StopWhenUnneeded = true;
+      # A switch of the system stops and starts each changed user unit, and
+      # the unit changes with each new package. A stop of the container
+      # stops all programs of its runs. Thus a switch does not stop it: the
+      # new unit applies at the next start.
+      restartIfChanged = false;
       serviceConfig = {
         # The service tells systemd when the container can start programs,
         # and systemd starts the scope of a run only then (After=).
@@ -1256,6 +1261,9 @@ in
     systemd.user.services."sandbox-nix-daemon@" = lib.mkIf anyNix {
       description = "Nix daemon connection of a sandbox (untrusted)";
       environment.NIX_REMOTE = "daemon";
+      # A switch of the system does not stop a connection (a build in a
+      # sandbox).
+      restartIfChanged = false;
       serviceConfig = {
         # --force-untrusted needs the experimental feature daemon-trust-override.
         # Also --process-ops is necessary (it needs mounted-ssh-store): without
