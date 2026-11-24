@@ -86,6 +86,8 @@ pub struct Env {
     pub description: String,
     pub color: String,
     pub gtk_theme: Option<String>,
+    /// The theme of the dark color scheme: only kwm reads it.
+    pub gtk_theme_dark: Option<String>,
     pub backend: String,
     pub hostname: String,
     pub persistent_home: bool,

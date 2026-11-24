@@ -11,7 +11,7 @@ use crate::tools;
 /// the tests of gui set it).
 pub fn env_json() -> Value {
     json!({
-        "description": "", "color": "#008080", "gtkTheme": null, "backend": "bwrap", "hostname": "s",
+        "description": "", "color": "#008080", "gtkTheme": null, "gtkThemeDark": null, "backend": "bwrap", "hostname": "s",
         "persistentHome": true, "homeDirectory": "~/.local/share/sandboxes/s/home",
         "homePatterns": [], "paths": [], "env": {},
         "sshWrite": false, "gpg": false, "docker": false, "fuse": false, "gui": false,

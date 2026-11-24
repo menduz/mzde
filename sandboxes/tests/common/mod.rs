@@ -102,7 +102,7 @@ pub fn stderr(o: &Output) -> String {
 /// A sandbox with the defaults of module.nix, without gui, X11 and D-Bus.
 pub fn env_json(name: &str, home: &str) -> Value {
     json!({
-        "description": format!("sandbox {name}"), "color": "#008080", "gtkTheme": null, "backend": "bwrap", "hostname": name,
+        "description": format!("sandbox {name}"), "color": "#008080", "gtkTheme": null, "gtkThemeDark": null, "backend": "bwrap", "hostname": name,
         "persistentHome": true, "homeDirectory": home, "homePatterns": [], "paths": [], "env": {},
         "sshWrite": false, "gpg": false, "docker": false, "fuse": false, "gui": false,
         "x11": "none", "dbus": "none", "notifications": true, "followColorScheme": false, "nvidia": false, "kvm": false, "audio": false,

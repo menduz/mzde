@@ -682,6 +682,9 @@ in
     with subtest("cli"):
         names = client.succeed("su - alice -c 'sandbox list --names'").split()
         assert sorted(names) == sorted(conf["environments"]), names
+        # sandbox knows each field that module.nix writes.
+        err = client.succeed("su - alice -c 'sandbox list --names 2>&1 >/dev/null'")
+        assert "does not know" not in err, err
         out = client.succeed("su - alice -c 'sandbox list'")
         assert any(l.startswith("gnet ") and "#800080" in l and "gvisor" in l for l in out.splitlines()), out
         out = client.succeed("su - alice -c 'sandbox show net'")
