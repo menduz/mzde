@@ -41,11 +41,11 @@
     "kwm": {
       "flake": false,
       "locked": {
-        "lastModified": 1795307016,
-        "narHash": "sha256-B0FVgUWpg8C37FGBVq4wFbTW566ew5SGifVexgfLgfw=",
+        "lastModified": 1795526957,
+        "narHash": "sha256-8cwMCtq8KkVWS5n/SLBaWF+ewujno/z9bW4XwKRRt14=",
         "ref": "refs/heads/master",
-        "rev": "4dc0e278c95b0e567a758078aa826c0741c1df3e",
-        "revCount": 736,
+        "rev": "6de635f3ca00eff5b5c3666c76127b5ee279fd40",
+        "revCount": 737,
         "type": "git",
         "url": "https://github.com/menduz/kwm.git"
       },
@@ -155,11 +155,11 @@
     "win-classic-theme": {
       "flake": false,
       "locked": {
-        "lastModified": 1792763924,
-        "narHash": "sha256-6nL2WIRdkvh9VnUUr7AFdtsaw4iN5EZROblebPYqcKc=",
+        "lastModified": 1795526773,
+        "narHash": "sha256-ay0K+RwPdOVBNF9tlmY6zRgBNMJTi2fuqrszKBgcjHo=",
         "ref": "refs/heads/main",
-        "rev": "e5388655de27b7f336acd1d348c612ce9466ce25",
-        "revCount": 77,
+        "rev": "363f18de5742a66d8f678622af2904dcca801efd",
+        "revCount": 78,
         "type": "git",
         "url": "https://github.com/menduz/win-classic-theme.git"
       },
