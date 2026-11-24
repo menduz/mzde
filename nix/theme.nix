@@ -99,7 +99,11 @@ let
     # Ghostty reads the color scheme and changes its palette without help.
     mkdir -p "$state"
     printf '%s\n' "$scheme" >"$state/scheme"
+    # One notification: each one replaces the last one of toggle-theme (the
+    # stack tag of dunst, and the synchronous hint of other servers).
     ${pkgs.libnotify}/bin/notify-send -e -t 2000 -a toggle-theme \
+      -h string:x-dunst-stack-tag:toggle-theme \
+      -h string:x-canonical-private-synchronous:toggle-theme \
       "Theme: $scheme" "$gtk_theme" || true
     printf '%s\n' "$scheme"
   '';
