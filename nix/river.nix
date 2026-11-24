@@ -509,10 +509,14 @@ let
     # use xdg-decoration, thus river tells kwm that it draws its own
     # decorations. This rule gives it the border of kwm. The rule is after the
     # float rules: a float rule can find a Ghostty window that draws its own
-    # decorations.
+    # decorations. The app-id is the class of Ghostty: com.mitchellh.ghostty,
+    # or a class below it (--class=com.mitchellh.ghostty.NAME).
     ++ [
       {
-        app_id.str = "com.mitchellh.ghostty";
+        app_id = {
+          str = "^com\\.mitchellh\\.ghostty";
+          regex = true;
+        };
         decoration = zon.enum "ssd";
       }
       # GTK gives the app-id of Ghostty only when Ghostty connects to a session
